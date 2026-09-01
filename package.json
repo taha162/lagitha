@@ -5,7 +5,8 @@
   "description": "لَگيتها — Lost & Found platform for Mosul",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && npm run db:deploy:auto && next build",
+    "db:deploy:auto": "sh -c 'if [ -n \"$DATABASE_URL\" ]; then prisma migrate deploy; else echo \"DATABASE_URL not set at build time — skipping migrate deploy\"; fi'",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
