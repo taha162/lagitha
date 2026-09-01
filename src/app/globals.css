@@ -1,0 +1,305 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   LAGAITHA design tokens
+   Every colour, radius and spacing step used in the product is declared here.
+   Components reference semantic names only — no raw hex values downstream.
+   ========================================================================== */
+
+@theme {
+  /* -- palette -------------------------------------------------------- */
+  --color-ink: #17221f;
+  --color-ink-soft: #2a3833;
+  --color-paper: #f7f5ef;
+
+  --color-background: #f7f5ef;
+  --color-surface: #fffdf8;
+  --color-surface-sunken: #f1eee5;
+  --color-text: #17221f;
+  --color-text-strong: #0d1614;
+  --color-muted: #747a76;
+  --color-border: #dcddd7;
+  --color-border-strong: #c6c8c0;
+
+  --color-primary: #176b63;
+  --color-primary-hover: #12564f;
+  --color-primary-soft: #e1efec;
+  --color-primary-contrast: #ffffff;
+
+  --color-success: #3f7d58;
+  --color-success-soft: #e4efe8;
+  --color-warning: #c58a32;
+  --color-warning-soft: #f7edda;
+  --color-danger: #b85450;
+  --color-danger-soft: #f6e5e4;
+
+  /* Report type accents. LOST and FOUND must be tellable apart at a glance
+     without relying on colour alone — the badge text carries the meaning. */
+  --color-lost: #b85450;
+  --color-lost-soft: #f6e5e4;
+  --color-found: #3f7d58;
+  --color-found-soft: #e4efe8;
+
+  --color-focus: #176b63;
+
+  /* -- typography ------------------------------------------------------ */
+  --font-sans: var(--font-arabic), "Segoe UI", system-ui, sans-serif;
+  --font-latin: var(--font-latin), ui-sans-serif, system-ui, sans-serif;
+
+  --text-display: 1.875rem;
+  --text-display--line-height: 1.35;
+  --text-display--letter-spacing: 0;
+  --text-display--font-weight: 600;
+
+  --text-h1: 1.5rem;
+  --text-h1--line-height: 1.4;
+  --text-h1--font-weight: 600;
+
+  --text-h2: 1.1875rem;
+  --text-h2--line-height: 1.45;
+  --text-h2--font-weight: 600;
+
+  --text-h3: 1rem;
+  --text-h3--line-height: 1.5;
+  --text-h3--font-weight: 600;
+
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.75;
+
+  --text-meta: 0.8125rem;
+  --text-meta--line-height: 1.6;
+
+  --text-fine: 0.75rem;
+  --text-fine--line-height: 1.6;
+
+  /* -- radius ---------------------------------------------------------- */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /* -- elevation: two steps only --------------------------------------- */
+  --shadow-raised: 0 1px 2px rgb(23 34 31 / 0.06), 0 1px 1px rgb(23 34 31 / 0.04);
+  --shadow-overlay: 0 12px 32px -12px rgb(23 34 31 / 0.28);
+}
+
+/* Dark context. Roles are preserved: paper becomes a deep ink, ink becomes
+   a warm off-white. Neither end is pure black or pure white. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-background: #131a18;
+    --color-surface: #1a2321;
+    --color-surface-sunken: #101615;
+    --color-text: #e8e9e4;
+    --color-text-strong: #f5f5f1;
+    --color-muted: #9aa19c;
+    --color-border: #2c3733;
+    --color-border-strong: #3d4a45;
+
+    --color-primary: #4d9d94;
+    --color-primary-hover: #5fb0a6;
+    --color-primary-soft: #1c2f2c;
+    --color-primary-contrast: #0d1614;
+
+    --color-success: #6fa984;
+    --color-success-soft: #1b2a22;
+    --color-warning: #d8a457;
+    --color-warning-soft: #2c2417;
+    --color-danger: #d2807c;
+    --color-danger-soft: #2d1e1d;
+
+    --color-lost: #d2807c;
+    --color-lost-soft: #2d1e1d;
+    --color-found: #6fa984;
+    --color-found-soft: #1b2a22;
+
+    --color-focus: #6fbdb2;
+
+    --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-overlay: 0 12px 32px -12px rgb(0 0 0 / 0.55);
+  }
+}
+
+@layer base {
+  html {
+    /* Arabic numerals inside a mostly-Arabic UI read better as Latin digits
+       for phone numbers and counts, which is the local convention. */
+    font-variant-numeric: lining-nums tabular-nums;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: 1.75;
+    /* Arabic script needs no synthetic letter-spacing; it breaks joins. */
+    letter-spacing: 0;
+  }
+
+  /* Latin runs (brands, phone numbers, references) inside Arabic text. */
+  .latin,
+  input[type="tel"],
+  code {
+    font-family: var(--font-latin);
+    letter-spacing: 0;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    color: var(--color-text-strong);
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Remove the focus ring only where we draw our own. */
+  .focus-ring-none:focus-visible {
+    outline: none;
+  }
+
+  ::placeholder {
+    color: var(--color-muted);
+    opacity: 1;
+  }
+
+  /* Respect the platform preference — motion is never load-bearing here. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Skeletons: one shared shimmer, used sparingly. */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-sunken) 25%,
+      color-mix(in srgb, var(--color-surface-sunken) 60%, var(--color-border)) 37%,
+      var(--color-surface-sunken) 63%
+    );
+    background-size: 400% 100%;
+    animation: lg-shimmer 1.4s ease-in-out infinite;
+  }
+
+  @keyframes lg-shimmer {
+    0% {
+      background-position: 100% 50%;
+    }
+    100% {
+      background-position: 0 50%;
+    }
+  }
+
+  .enter-fade {
+    animation: lg-fade 180ms ease-out both;
+  }
+
+  @keyframes lg-fade {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* Native <dialog> gives us focus trapping, Esc and inertness for free. */
+  dialog::backdrop {
+    background: rgb(13 22 20 / 0.45);
+  }
+
+  dialog[open] {
+    animation: lg-fade 160ms ease-out both;
+  }
+
+  .sheet[open] {
+    animation: lg-sheet-up 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @keyframes lg-sheet-up {
+    from {
+      transform: translateY(12px);
+      opacity: 0;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+}
+
+/* Leaflet: neutralise its default typography and chrome so the map reads as
+   part of this product rather than a bolted-on widget. */
+.leaflet-container {
+  font-family: var(--font-sans);
+  background: var(--color-surface-sunken);
+}
+
+.leaflet-control-attribution {
+  font-size: 10px;
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent) !important;
+  color: var(--color-muted);
+}
+
+.leaflet-control-attribution a {
+  color: var(--color-muted);
+}
+
+.leaflet-bar a {
+  color: var(--color-text) !important;
+  background: var(--color-surface) !important;
+  border-color: var(--color-border) !important;
+}
+
+.leaflet-popup-content-wrapper {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-overlay);
+}
+
+.leaflet-popup-tip {
+  background: var(--color-surface);
+}
+
+.leaflet-popup-content a {
+  color: var(--color-primary);
+}
+
+/* Markers are divIcons so they can use the design tokens directly. */
+.lg-pin {
+  background: none;
+  border: 0;
+}
+
+.lg-cluster {
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+  border: 2px solid var(--color-surface);
+  box-shadow: var(--shadow-raised);
+  font-family: var(--font-latin);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
