@@ -1,0 +1,550 @@
+// لَگيتها — LAGAITHA
+// Lost & Found platform for Mosul.
+//
+// Design notes:
+//  * Precise coordinates are stored but never serialised to public consumers.
+//    Every public read path goes through src/lib/privacy.ts.
+//  * Report attributes (title / colour / brand / category) live on Report itself
+//    rather than a separate Item table: a report always describes exactly one
+//    item, so the join would add cost without adding meaning.
+//  * `searchText` is a denormalised, Arabic-normalised blob indexed with pg_trgm.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------- enums ----
+
+enum UserRole {
+  MEMBER
+  MODERATOR
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum ReportType {
+  LOST
+  FOUND
+}
+
+/// Lifecycle of the report as its author sees it.
+enum ReportStatus {
+  ACTIVE
+  RECOVERED
+  CLOSED
+}
+
+/// Moderation state, controlled by staff. Only VISIBLE reports are public.
+enum ModerationState {
+  VISIBLE
+  UNDER_REVIEW
+  HIDDEN
+  REJECTED
+}
+
+/// Drives how much of the report is safe to publish.
+enum Sensitivity {
+  NORMAL
+  SENSITIVE
+}
+
+/// How exact the "when" answer was, so the UI can phrase it honestly.
+enum TimePrecision {
+  EXACT
+  DAY
+  WEEK
+}
+
+enum MatchKind {
+  POTENTIAL_MATCH
+  POSSIBLE_DUPLICATE
+}
+
+enum MatchStatus {
+  SUGGESTED
+  VIEWED
+  DISMISSED
+  CONFIRMED
+}
+
+enum VerificationStatus {
+  AWAITING_FINDER_SECRET
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum ConversationStatus {
+  OPEN
+  CLOSED
+  BLOCKED
+}
+
+enum NotificationType {
+  POTENTIAL_MATCH
+  MESSAGE_RECEIVED
+  VERIFICATION_REQUESTED
+  VERIFICATION_ACCEPTED
+  VERIFICATION_REJECTED
+  REPORT_STATUS_CHANGED
+  RECOVERY_COMPLETED
+  REPORT_MODERATED
+}
+
+enum FlagReason {
+  SPAM
+  INAPPROPRIATE
+  FRAUD
+  WRONG_INFO
+  DUPLICATE
+  PRIVACY
+  OTHER
+}
+
+enum FlagStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+enum BankSide {
+  LEFT_BANK
+  RIGHT_BANK
+  OUTSKIRTS
+}
+
+// --------------------------------------------------------------- models ----
+
+model User {
+  id          String     @id @default(cuid())
+  /// E.164, e.g. +9647701234567. The only identifier we ask for.
+  phone       String     @unique
+  displayName String
+  role        UserRole   @default(MEMBER)
+  status      UserStatus @default(ACTIVE)
+  /// Set when the phone number completed an OTP challenge.
+  verifiedAt  DateTime?
+  suspendedUntil DateTime?
+  suspensionReason String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  lastSeenAt  DateTime   @default(now())
+
+  sessions              Session[]
+  reports               Report[]
+  notifications         Notification[]
+  verificationRequests  VerificationRequest[]  @relation("ClaimantVerifications")
+  verificationDecisions VerificationRequest[]  @relation("DecidedVerifications")
+  startedConversations  Conversation[]         @relation("ConversationInitiator")
+  ownedConversations    Conversation[]         @relation("ConversationOwner")
+  messages              Message[]
+  recoveriesAsOwner     Recovery[]             @relation("RecoveryOwner")
+  recoveriesAsFinder    Recovery[]             @relation("RecoveryFinder")
+  flagsRaised           Flag[]                 @relation("FlagReporter")
+  flagsResolved         Flag[]                 @relation("FlagResolver")
+  adminActions          AdminAction[]
+  dismissedMatches      Match[]                @relation("MatchDismisser")
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  /// SHA-256 of the opaque cookie token. The raw token never touches the DB.
+  tokenHash  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  userAgent  String?
+  ipHash     String?
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model OtpChallenge {
+  id         String    @id @default(cuid())
+  phone      String
+  codeHash   String
+  salt       String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, createdAt])
+  @@index([expiresAt])
+  @@map("otp_challenges")
+}
+
+model Category {
+  id        String  @id @default(cuid())
+  slug      String  @unique
+  nameAr    String
+  /// Lucide icon name rendered by the category picker.
+  icon      String
+  /// When true, public views fall back to `publicLabelAr` and hide the description.
+  sensitive Boolean @default(false)
+  /// Generic public wording, e.g. "وثيقة شخصية" instead of a document's real title.
+  publicLabelAr String?
+  /// Short hint shown under the field in the report wizard.
+  hintAr    String?
+  sortOrder Int     @default(0)
+  active    Boolean @default(true)
+
+  reports Report[]
+
+  @@index([active, sortOrder])
+  @@map("categories")
+}
+
+/// Mosul neighbourhoods. Coordinates → area resolution happens locally so the
+/// product does not depend on a third-party geocoder being reachable.
+model Area {
+  id      String   @id @default(cuid())
+  slug    String   @unique
+  nameAr  String
+  side    BankSide
+  lat     Float
+  lng     Float
+  /// Nominal radius in metres, used for nearest-area resolution.
+  radiusM Int      @default(1200)
+
+  reports Report[]
+
+  @@index([side])
+  @@map("areas")
+}
+
+model Report {
+  id        String  @id @default(cuid())
+  /// Short human-shareable reference (LG-XXXXXX). Used in URLs instead of the id.
+  reference String  @unique
+
+  type       ReportType
+  status     ReportStatus    @default(ACTIVE)
+  moderation ModerationState @default(VISIBLE)
+  sensitivity Sensitivity    @default(NORMAL)
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  title       String
+  description String?
+  /// Controlled colour token (see src/lib/attributes.ts), not free text.
+  color       String?
+  brand       String?
+
+  occurredAt        DateTime
+  occurredPrecision TimePrecision @default(DAY)
+
+  areaId     String?
+  area       Area?   @relation(fields: [areaId], references: [id])
+  /// Public, human-readable place, e.g. "حي الجامعة — قرب الجامعة".
+  areaLabel  String
+  landmark   String?
+  /// PRIVATE. Never leaves the server except for staff tooling and matching.
+  preciseLat Float?
+  preciseLng Float?
+  /// Coarsened coordinates safe to render on public maps.
+  approxLat  Float
+  approxLng  Float
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// A detail the finder deliberately left out of the public report.
+  /// The claimant must describe it; it is never shown to the claimant.
+  verificationSecret String?
+
+  /// Optional output of an AIAnalysisProvider. Absent is a normal state.
+  aiAnalysis Json?
+
+  /// Denormalised Arabic-normalised haystack, indexed with pg_trgm.
+  searchText String @default("")
+
+  viewCount Int @default(0)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  publishedAt DateTime  @default(now())
+  resolvedAt  DateTime?
+
+  images               ReportImage[]
+  matchesAsA           Match[]               @relation("MatchReportA")
+  matchesAsB           Match[]               @relation("MatchReportB")
+  verificationRequests VerificationRequest[]
+  conversations        Conversation[]
+  notifications        Notification[]
+  flags                Flag[]
+  recoveries           Recovery[]            @relation("RecoveryReport")
+  counterpartRecoveries Recovery[]           @relation("RecoveryCounterpart")
+
+  @@index([type, status, moderation, publishedAt])
+  @@index([categoryId, type, status])
+  @@index([userId, createdAt])
+  @@index([areaId])
+  @@index([status, moderation])
+  @@index([createdAt])
+  @@map("reports")
+}
+
+model ReportImage {
+  id         String   @id @default(cuid())
+  reportId   String
+  report     Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  /// Keys resolved by the configured StorageProvider, not raw URLs.
+  storageKey String
+  thumbKey   String
+  width      Int
+  height     Int
+  bytes      Int
+  mime       String
+  position   Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([reportId, position])
+  @@map("report_images")
+}
+
+model Match {
+  id   String    @id @default(cuid())
+  kind MatchKind @default(POTENTIAL_MATCH)
+
+  /// For POTENTIAL_MATCH, A is always the LOST report and B the FOUND report.
+  /// For POSSIBLE_DUPLICATE both sides share the same type.
+  reportAId String
+  reportA   Report @relation("MatchReportA", fields: [reportAId], references: [id], onDelete: Cascade)
+  reportBId String
+  reportB   Report @relation("MatchReportB", fields: [reportBId], references: [id], onDelete: Cascade)
+
+  /// 0–100. Presented to users as "تطابق محتمل", never as certainty.
+  score   Int
+  /// Array of { code, label, weight } explaining the score.
+  reasons Json
+  status  MatchStatus @default(SUGGESTED)
+
+  dismissedById String?
+  dismissedBy   User?   @relation("MatchDismisser", fields: [dismissedById], references: [id], onDelete: SetNull)
+  dismissedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  verificationRequests VerificationRequest[]
+  notifications        Notification[]
+  conversations        Conversation[]
+
+  @@unique([reportAId, reportBId, kind])
+  @@index([status, score])
+  @@index([kind, status, createdAt])
+  @@index([reportBId])
+  @@map("matches")
+}
+
+model VerificationRequest {
+  id String @id @default(cuid())
+
+  /// The report being claimed (normally the FOUND report).
+  reportId   String
+  report     Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  claimantId String
+  claimant   User   @relation("ClaimantVerifications", fields: [claimantId], references: [id], onDelete: Cascade)
+
+  matchId String?
+  match   Match?  @relation(fields: [matchId], references: [id], onDelete: SetNull)
+
+  /// The claimant's private answer. Revealed to the finder only after the
+  /// finder has committed their own secret detail.
+  answer String
+
+  /// Snapshot of the finder's secret at the moment the claim was filed, so a
+  /// later edit cannot be used to move the goalposts.
+  finderSecretSnapshot String?
+
+  status          VerificationStatus @default(PENDING)
+  decidedAt       DateTime?
+  decidedById     String?
+  decidedBy       User?              @relation("DecidedVerifications", fields: [decidedById], references: [id], onDelete: SetNull)
+  decisionNote    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notifications Notification[]
+
+  @@unique([reportId, claimantId])
+  @@index([status, createdAt])
+  @@index([claimantId])
+  @@map("verification_requests")
+}
+
+model Conversation {
+  id       String @id @default(cuid())
+  reportId String
+  report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  /// The person who reached out.
+  initiatorId String
+  initiator   User   @relation("ConversationInitiator", fields: [initiatorId], references: [id], onDelete: Cascade)
+  /// The report author.
+  ownerId String
+  owner   User   @relation("ConversationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  matchId String?
+  match   Match?  @relation(fields: [matchId], references: [id], onDelete: SetNull)
+
+  status        ConversationStatus @default(OPEN)
+  createdAt     DateTime           @default(now())
+  lastMessageAt DateTime           @default(now())
+
+  messages      Message[]
+  notifications Notification[]
+
+  @@unique([reportId, initiatorId])
+  @@index([ownerId, lastMessageAt])
+  @@index([initiatorId, lastMessageAt])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  body      String
+  /// Set when the rule-based scanner spots a phone number or other risk signal.
+  warned    Boolean   @default(false)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model Notification {
+  id     String           @id @default(cuid())
+  userId String
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type   NotificationType
+
+  /// Structured payload; the Arabic copy lives in the i18n dictionary.
+  payload Json?
+
+  reportId       String?
+  report         Report?              @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  matchId        String?
+  match          Match?               @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  conversationId String?
+  conversation   Conversation?        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  verificationId String?
+  verification   VerificationRequest? @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+/// A completed recovery is the platform's own evidence that it works, so the
+/// record outlives the rows it points at: deleting a user or a report detaches
+/// the recovery instead of erasing it. That keeps the impact statistics honest
+/// while carrying no personal data of its own.
+model Recovery {
+  id       String  @id @default(cuid())
+  reportId String?
+  report   Report? @relation("RecoveryReport", fields: [reportId], references: [id], onDelete: SetNull)
+
+  counterpartReportId String?
+  counterpartReport   Report? @relation("RecoveryCounterpart", fields: [counterpartReportId], references: [id], onDelete: SetNull)
+
+  ownerId  String?
+  owner    User?   @relation("RecoveryOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  finderId String?
+  finder   User?   @relation("RecoveryFinder", fields: [finderId], references: [id], onDelete: SetNull)
+
+  ownerConfirmedAt  DateTime?
+  finderConfirmedAt DateTime?
+  completedAt       DateTime?
+  /// Hours between the earlier report being published and completion.
+  durationHours     Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([reportId, ownerId, finderId])
+  @@index([completedAt])
+  @@map("recoveries")
+}
+
+model Flag {
+  id       String  @id @default(cuid())
+  reportId String?
+  report   Report? @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  reporterId String?
+  reporter   User?      @relation("FlagReporter", fields: [reporterId], references: [id], onDelete: SetNull)
+  reason     FlagReason
+  note       String?
+  status     FlagStatus @default(OPEN)
+
+  resolvedById String?
+  resolvedBy   User?     @relation("FlagResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([status, createdAt])
+  @@index([reportId])
+  @@map("flags")
+}
+
+model AdminAction {
+  id      String @id @default(cuid())
+  actorId String
+  actor   User   @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+  @@map("admin_actions")
+}
+
+/// Fixed-window counters. Small enough to keep in Postgres for a single-region
+/// MVP; swap for Redis when there is more than one app node.
+model RateLimit {
+  id          String   @id @default(cuid())
+  bucket      String   @unique
+  count       Int      @default(0)
+  windowStart DateTime @default(now())
+  expiresAt   DateTime
+
+  @@index([expiresAt])
+  @@map("rate_limits")
+}
