@@ -23,27 +23,34 @@ export async function GET() {
   const checks: Record<string, Check> = {};
 
   // ---- required configuration -------------------------------------------
-  const databaseUrl = process.env.DATABASE_URL;
+  const { resolveDatabaseUrl, presentDatabaseUrlKeys, DATABASE_URL_KEYS } = await import(
+    "@/lib/database-url"
+  );
+
+  const databaseUrl = resolveDatabaseUrl();
+  const present = presentDatabaseUrlKeys();
   checks.DATABASE_URL = databaseUrl
-    ? { ok: true, detail: `set (${describeDatabaseUrl(databaseUrl)})` }
-    : { ok: false, detail: "MISSING — add it in Vercel → Settings → Environment Variables" };
+    ? { ok: true, detail: `using ${present[0]} (${describeDatabaseUrl(databaseUrl)})` }
+    : {
+        ok: false,
+        detail:
+          `none of these is set to a non-empty value: ${DATABASE_URL_KEYS.join(", ")}. ` +
+          `${describeDefined(DATABASE_URL_KEYS)}`,
+      };
 
-  const sessionSecret = process.env.SESSION_SECRET;
-  checks.SESSION_SECRET = !sessionSecret
-    ? { ok: false, detail: "MISSING — generate with: openssl rand -base64 48" }
-    : sessionSecret.length < 32
-      ? { ok: false, detail: `too short (${sessionSecret.length} chars, need 32+)` }
-      : sessionSecret.startsWith("dev-only")
-        ? { ok: false, detail: "still the development placeholder" }
-        : { ok: true, detail: `set (${sessionSecret.length} chars)` };
+  checks.SESSION_SECRET = describeSecret(process.env.SESSION_SECRET);
 
-  const otpProvider = process.env.OTP_PROVIDER ?? "disabled";
+  // `??` would let an empty string through; a blank value is a missing value.
+  const otpProvider = nonEmpty(process.env.OTP_PROVIDER) ?? "disabled";
   checks.OTP_PROVIDER =
     otpProvider === "console"
       ? { ok: false, detail: "'console' prints login codes to the log; refused in production" }
-      : { ok: true, detail: otpProvider };
+      : {
+          ok: true,
+          detail: process.env.OTP_PROVIDER === "" ? "defined but empty → 'disabled'" : otpProvider,
+        };
 
-  checks.OTP_DEV_FIXED_CODE = process.env.OTP_DEV_FIXED_CODE
+  checks.OTP_DEV_FIXED_CODE = nonEmpty(process.env.OTP_DEV_FIXED_CODE)
     ? { ok: false, detail: "set — must be removed in production" }
     : { ok: true, detail: "not set" };
 
@@ -132,6 +139,37 @@ export async function GET() {
       headers: { "Cache-Control": "no-store" },
     },
   );
+}
+
+/** Treats a blank value as absent, which is what a dashboard-defined empty is. */
+function nonEmpty(value: string | undefined): string | undefined {
+  return value && value.trim().length > 0 ? value : undefined;
+}
+
+/**
+ * Distinguishes "never defined" from "defined but blank" — the two look
+ * identical in a dashboard but only one of them looks like a bug.
+ */
+function describeDefined(keys: readonly string[]): string {
+  const defined = keys.filter((key) => process.env[key] !== undefined);
+  if (defined.length === 0) return "None of them are defined at all.";
+  return `Defined but EMPTY: ${defined.join(", ")} — the variable exists with a blank value.`;
+}
+
+function describeSecret(secret: string | undefined): Check {
+  if (secret === undefined) {
+    return { ok: false, detail: "not defined — generate with: openssl rand -base64 48" };
+  }
+  if (secret.trim().length === 0) {
+    return { ok: false, detail: "defined but EMPTY — paste the value into Vercel and redeploy" };
+  }
+  if (secret.length < 32) {
+    return { ok: false, detail: `too short (${secret.length} chars, need 32+)` };
+  }
+  if (secret.startsWith("dev-only")) {
+    return { ok: false, detail: "still the development placeholder" };
+  }
+  return { ok: true, detail: `set (${secret.length} chars)` };
 }
 
 /** Host and database name only — never the credentials. */

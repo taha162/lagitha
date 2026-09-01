@@ -1,5 +1,6 @@
 import path from "node:path";
 import { defineConfig } from "prisma/config";
+import { resolveDatabaseUrl } from "./src/lib/database-url";
 
 /**
  * Prisma 7 moved the connection URL out of `schema.prisma`.
@@ -20,6 +21,8 @@ export default defineConfig({
     seed: "tsx prisma/seed.ts",
   },
   datasource: {
-    url: process.env.DATABASE_URL,
+    // Same resolution the app uses, so migrations and the runtime client can
+    // never end up pointed at different databases.
+    url: resolveDatabaseUrl(),
   },
 });

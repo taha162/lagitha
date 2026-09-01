@@ -1,4 +1,5 @@
 import "server-only";
+import { DATABASE_URL_KEYS, resolveDatabaseUrl } from "./database-url";
 
 /**
  * Every environment variable the server reads is declared here, so a missing
@@ -41,14 +42,28 @@ function integer(name: string, fallback: number): number {
 
 const isProduction = process.env.NODE_ENV === "production";
 
+/**
+ * Accepts any of the connection-string names a Vercel Postgres/Neon
+ * integration may have provisioned, not just `DATABASE_URL`.
+ */
+function requiredDatabaseUrl(): string {
+  const resolved = resolveDatabaseUrl();
+  if (resolved) return resolved;
+
+  if (process.env.NODE_ENV !== "production" || isBuildPhase) {
+    return "postgresql://lagaitha:lagaitha@127.0.0.1:5432/lagaitha_dev";
+  }
+
+  throw new Error(
+    `No database connection string found. Set one of: ${DATABASE_URL_KEYS.join(", ")}.`,
+  );
+}
+
 export const env = {
   isProduction,
   isTest: process.env.NODE_ENV === "test",
 
-  databaseUrl: required(
-    "DATABASE_URL",
-    "postgresql://lagaitha:lagaitha@127.0.0.1:5432/lagaitha_dev",
-  ),
+  databaseUrl: requiredDatabaseUrl(),
 
   sessionSecret: required(
     "SESSION_SECRET",
