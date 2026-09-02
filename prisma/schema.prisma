@@ -26,6 +26,12 @@ enum UserRole {
   ADMIN
 }
 
+/// How a login code was delivered.
+enum OtpChannel {
+  EMAIL
+  SMS
+}
+
 enum UserStatus {
   ACTIVE
   SUSPENDED
@@ -128,12 +134,15 @@ enum BankSide {
 
 model User {
   id          String     @id @default(cuid())
-  /// E.164, e.g. +9647701234567. The only identifier we ask for.
-  phone       String     @unique
+  /// Login identifier when AUTH_CHANNEL is email. Stored lower-cased.
+  email       String?    @unique
+  /// E.164, e.g. +9647701234567. Optional: only set when signing in by SMS,
+  /// or supplied later by the user. Never published, in either case.
+  phone       String?    @unique
   displayName String
   role        UserRole   @default(MEMBER)
   status      UserStatus @default(ACTIVE)
-  /// Set when the phone number completed an OTP challenge.
+  /// Set when the identifier completed an OTP challenge.
   verifiedAt  DateTime?
   suspendedUntil DateTime?
   suspensionReason String?
@@ -179,16 +188,19 @@ model Session {
 }
 
 model OtpChallenge {
-  id         String    @id @default(cuid())
-  phone      String
+  id         String     @id @default(cuid())
+  /// Where the code was sent: an email address or an E.164 phone number,
+  /// depending on the configured channel. Normalised before storage.
+  identifier String
+  channel    OtpChannel @default(EMAIL)
   codeHash   String
   salt       String
   expiresAt  DateTime
-  attempts   Int       @default(0)
+  attempts   Int        @default(0)
   consumedAt DateTime?
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime   @default(now())
 
-  @@index([phone, createdAt])
+  @@index([identifier, createdAt])
   @@index([expiresAt])
   @@map("otp_challenges")
 }

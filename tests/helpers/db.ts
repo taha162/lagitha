@@ -80,7 +80,7 @@ export async function createUser(
   userCounter += 1;
   return testDb.user.create({
     data: {
-      phone: `+96477${String(10_000_000 + userCounter).slice(0, 8)}`,
+      email: `user${userCounter}@test.local`,
       displayName: overrides.displayName ?? `مستخدم ${userCounter}`,
       role: overrides.role ?? "MEMBER",
       status: overrides.status ?? "ACTIVE",

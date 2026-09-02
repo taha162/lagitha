@@ -1,23 +1,39 @@
 import "server-only";
 import { env } from "../env";
+import { ResendOtpProvider, SmtpOtpProvider } from "./otp-email";
 
 /**
- * SMS delivery behind one interface.
+ * Login-code delivery behind one interface.
  *
- * Four drivers:
+ * Email drivers (see ./otp-email.ts):
+ *   resend   — HTTP API, best deliverability, needs a verified domain
+ *   smtp     — Gmail / Brevo / any SMTP host; no domain needed, so it is the
+ *              zero-cost path for a launch without a domain
+ *
+ * SMS drivers:
  *   twilio   — works internationally, including Iraqi mobile numbers
- *   http     — any gateway with a plain HTTP API (most local Iraqi aggregators)
+ *   http     — any gateway with a plain HTTP API (local Iraqi aggregators)
+ *
+ * Always available:
  *   console  — prints the code to the server log; development only
  *   disabled — refuses login with a clear Arabic message
  *
+ * The selected driver's `channel` decides what the sign-in screen asks for, so
+ * switching between email and SMS is one environment variable, not a rewrite.
+ *
  * A driver never throws: it returns false and the caller shows the user a
- * human message. A network failure at the SMS vendor must not take down login
- * with a stack trace.
+ * human message. A failure at the vendor must not take down login with a
+ * stack trace.
  */
+/** Which identifier the login form must ask for. */
+export type OtpChannel = "email" | "sms";
+
 export interface OtpDeliveryProvider {
   readonly name: string;
+  /** Decides whether the sign-in screen asks for an email or a phone number. */
+  readonly channel: OtpChannel;
   /** Returns false when the code could not be delivered. Never throws. */
-  send(phone: string, code: string): Promise<boolean>;
+  send(destination: string, code: string): Promise<boolean>;
   /** True when the UI may tell the user to check the server log. */
   readonly isDevelopmentDriver: boolean;
 }
@@ -33,6 +49,8 @@ const SEND_TIMEOUT_MS = 10_000;
 class ConsoleOtpProvider implements OtpDeliveryProvider {
   readonly name = "console";
   readonly isDevelopmentDriver = true;
+  /** Follows AUTH_CHANNEL so development mirrors the configured production flow. */
+  constructor(readonly channel: OtpChannel) {}
 
   async send(phone: string, code: string): Promise<boolean> {
     // eslint-disable-next-line no-console -- this driver's entire purpose
@@ -44,6 +62,7 @@ class ConsoleOtpProvider implements OtpDeliveryProvider {
 class DisabledOtpProvider implements OtpDeliveryProvider {
   readonly name = "disabled";
   readonly isDevelopmentDriver = false;
+  constructor(readonly channel: OtpChannel) {}
 
   async send(): Promise<boolean> {
     return false;
@@ -59,6 +78,7 @@ class DisabledOtpProvider implements OtpDeliveryProvider {
  */
 class TwilioOtpProvider implements OtpDeliveryProvider {
   readonly name = "twilio";
+  readonly channel = "sms" as const;
   readonly isDevelopmentDriver = false;
 
   constructor(
@@ -127,6 +147,7 @@ class TwilioOtpProvider implements OtpDeliveryProvider {
  */
 class HttpOtpProvider implements OtpDeliveryProvider {
   readonly name = "http";
+  readonly channel = "sms" as const;
   readonly isDevelopmentDriver = false;
 
   constructor(
@@ -185,10 +206,46 @@ function jsonSafe(value: string): string {
 
 let cached: OtpDeliveryProvider | undefined;
 
+/**
+ * Which identifier the app asks for when no driver dictates it (console /
+ * disabled). Explicit, so a deployment with SMS switched off still shows the
+ * sign-in screen it is going to use once a driver is configured.
+ */
+function configuredChannel(): OtpChannel {
+  return env.authChannel === "sms" ? "sms" : "email";
+}
+
 export function otp(): OtpDeliveryProvider {
   if (cached) return cached;
+  cached = selectProvider();
+  return cached;
+}
 
+function selectProvider(): OtpDeliveryProvider {
   switch (env.otpProvider) {
+    case "resend": {
+      const { apiKey, from } = env.resend;
+      if (!apiKey || !from) {
+        console.error(
+          "[LAGAITHA] OTP_PROVIDER=resend needs RESEND_API_KEY and MAIL_FROM. " +
+            "Falling back to disabled.",
+        );
+        return new DisabledOtpProvider("email");
+      }
+      return new ResendOtpProvider({ apiKey, from });
+    }
+
+    case "smtp": {
+      const { host, port, secure, user, pass, from } = env.smtp;
+      if (!host || !from) {
+        console.error(
+          "[LAGAITHA] OTP_PROVIDER=smtp needs SMTP_HOST and MAIL_FROM. Falling back to disabled.",
+        );
+        return new DisabledOtpProvider("email");
+      }
+      return new SmtpOtpProvider({ host, port, secure, user, pass, from });
+    }
+
     case "twilio": {
       const { accountSid, authToken, from, messagingServiceSid } = env.twilio;
       if (!accountSid || !authToken || (!from && !messagingServiceSid)) {
@@ -196,11 +253,9 @@ export function otp(): OtpDeliveryProvider {
           "[LAGAITHA] OTP_PROVIDER=twilio needs TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN " +
             "and one of TWILIO_MESSAGING_SERVICE_SID / TWILIO_FROM. Falling back to disabled.",
         );
-        cached = new DisabledOtpProvider();
-        break;
+        return new DisabledOtpProvider("sms");
       }
-      cached = new TwilioOtpProvider({ accountSid, authToken, from, messagingServiceSid });
-      break;
+      return new TwilioOtpProvider({ accountSid, authToken, from, messagingServiceSid });
     }
 
     case "http": {
@@ -209,20 +264,15 @@ export function otp(): OtpDeliveryProvider {
         console.error(
           "[LAGAITHA] OTP_PROVIDER=http needs SMS_HTTP_URL. Falling back to disabled.",
         );
-        cached = new DisabledOtpProvider();
-        break;
+        return new DisabledOtpProvider("sms");
       }
-      cached = new HttpOtpProvider({ url, method, bodyTemplate, headers });
-      break;
+      return new HttpOtpProvider({ url, method, bodyTemplate, headers });
     }
 
     case "console":
-      cached = new ConsoleOtpProvider();
-      break;
+      return new ConsoleOtpProvider(configuredChannel());
 
     default:
-      cached = new DisabledOtpProvider();
+      return new DisabledOtpProvider(configuredChannel());
   }
-
-  return cached;
 }

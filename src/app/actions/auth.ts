@@ -23,31 +23,31 @@ export type ActionResult<T = undefined> =
 export async function requestCodeAction(
   _prev: unknown,
   formData: FormData,
-): Promise<ActionResult<{ phone: string; display: string; devDriver: boolean }>> {
-  const parsed = startLoginSchema.safeParse({ phone: formData.get("phone") });
+): Promise<ActionResult<{ identifier: string; display: string; devDriver: boolean }>> {
+  const parsed = startLoginSchema.safeParse({ identifier: formData.get("identifier") });
   if (!parsed.success) {
-    return { ok: false, error: ar.errors.invalidPhone, field: "phone" };
+    return { ok: false, error: ar.errors.invalidIdentifier, field: "identifier" };
   }
 
-  const result = await startLogin(parsed.data.phone);
+  const result = await startLogin(parsed.data.identifier);
 
   if (!result.ok) {
     switch (result.reason) {
-      case "invalid-phone":
-        return { ok: false, error: ar.errors.invalidPhone, field: "phone" };
+      case "invalid-identifier":
+        return { ok: false, error: ar.errors.invalidIdentifier, field: "identifier" };
       case "rate-limited":
         return {
           ok: false,
           error: ar.errors.rateLimited(result.retryAfterSeconds ?? 60),
-          field: "phone",
+          field: "identifier",
         };
       case "delivery-failed":
-        // The SMS driver is off. Say so plainly rather than pretending a code
-        // is on its way.
+        // No driver configured, or the vendor refused. Say so plainly rather
+        // than pretending a code is on its way.
         return {
           ok: false,
-          error: "خدمة الرسائل غير متاحة حالياً. راجع مزوّد الخدمة.",
-          field: "phone",
+          error: ar.auth.deliveryUnavailable,
+          field: "identifier",
         };
     }
   }
@@ -55,8 +55,11 @@ export async function requestCodeAction(
   return {
     ok: true,
     data: {
-      phone: result.phone,
-      display: formatPhoneForDisplay(result.phone),
+      identifier: result.identifier,
+      display:
+        result.channel === "sms"
+          ? formatPhoneForDisplay(result.identifier)
+          : result.identifier,
       devDriver: result.developmentDriver,
     },
   };
@@ -67,7 +70,7 @@ export async function verifyCodeAction(
   formData: FormData,
 ): Promise<ActionResult<{ isNewUser: boolean; next: string }>> {
   const parsed = verifyLoginSchema.safeParse({
-    phone: formData.get("phone"),
+    identifier: formData.get("identifier"),
     code: formData.get("code"),
   });
 
@@ -75,7 +78,7 @@ export async function verifyCodeAction(
     return { ok: false, error: ar.errors.invalidCode, field: "code" };
   }
 
-  const result = await verifyLogin(parsed.data.phone, parsed.data.code);
+  const result = await verifyLogin(parsed.data.identifier, parsed.data.code);
 
   if (!result.ok) {
     switch (result.reason) {
@@ -91,8 +94,8 @@ export async function verifyCodeAction(
         };
       case "suspended":
         return { ok: false, error: "هذا الحساب موقوف. راسلنا إذا تعتقد إنه خطأ." };
-      case "invalid-phone":
-        return { ok: false, error: ar.errors.invalidPhone, field: "phone" };
+      case "invalid-identifier":
+        return { ok: false, error: ar.errors.invalidIdentifier, field: "identifier" };
     }
   }
 

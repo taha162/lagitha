@@ -28,13 +28,13 @@ npm run dev
 mistaken for a real report. Reference data (categories, neighbourhoods) is
 seeded without the flag and is safe to run in production.
 
-Sign in with any seeded number — `07700000001` is an admin, `07700000010` and
-up are ordinary members — and the code from `OTP_DEV_FIXED_CODE` (`000000`).
-Without that variable the code is printed to the server log by the `console`
-OTP driver.
+Sign in with any seeded address — `admin@lagaitha.local` is an admin,
+`abu.ahmed@lagaitha.local` and the others are ordinary members — and the code
+from `OTP_DEV_FIXED_CODE` (`000000`). Without that variable the code is
+printed to the server log by the `console` driver.
 
 ```bash
-npm test          # 189 unit + integration tests (needs TEST_DATABASE_URL)
+npm test          # 219 unit + integration tests (needs TEST_DATABASE_URL)
 npm run typecheck
 npm run build
 ```
@@ -117,7 +117,7 @@ fallback, in `src/lib/providers/`:
 
 | interface | default | swap in |
 |---|---|---|
-| `OtpDeliveryProvider` | `console` (prints the code to the log) | an SMS gateway |
+| `OtpDeliveryProvider` | `console` (prints the code to the log) | `smtp` / `resend` (email) or `twilio` / `http` (SMS) |
 | `StorageProvider` | `local` (files under `./storage`) | any S3-compatible bucket |
 | `AIAnalysisProvider` | `none` | a model, as an *enhancement* only |
 | `GeocodingProvider` | local lookup over the seeded Mosul neighbourhoods | a geocoding service |

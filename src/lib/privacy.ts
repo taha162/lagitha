@@ -10,6 +10,7 @@ import type {
   TimePrecision,
   User,
 } from "@/generated/prisma/client";
+import { maskEmail } from "./email";
 import { mediaUrl } from "./providers/storage";
 
 /**
@@ -206,10 +207,20 @@ export function isPubliclyVisible(report: {
 }
 
 /**
- * Phone numbers are shown to nobody but their owner. This exists so that any
+ * Contact details are shown to nobody but their owner. These exist so that any
  * future "contact" surface has to go out of its way to leak one.
  */
 export function maskPhone(phone: string): string {
   const tail = phone.slice(-3);
   return `••••••${tail}`;
+}
+
+/**
+ * Whichever identifier an account has, masked for staff tooling.
+ * Returns a placeholder rather than throwing for an account with neither.
+ */
+export function maskIdentifier(user: { email?: string | null; phone?: string | null }): string {
+  if (user.email) return maskEmail(user.email);
+  if (user.phone) return maskPhone(user.phone);
+  return "—";
 }

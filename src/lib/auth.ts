@@ -8,6 +8,8 @@ import { env } from "./env";
 import { otp } from "./providers/otp";
 import { consumeRateLimit } from "./rate-limit";
 import { normalizePhone } from "./phone";
+import { normalizeEmail } from "./email";
+import type { OtpChannel } from "./providers/otp";
 
 /**
  * Authentication.
@@ -45,19 +47,50 @@ async function requestIp(): Promise<string | null> {
 
 // --------------------------------------------------------------- OTP ------
 
-export type StartLoginResult =
-  | { ok: true; phone: string; developmentDriver: boolean }
-  | { ok: false; reason: "invalid-phone" | "rate-limited" | "delivery-failed"; retryAfterSeconds?: number };
+/**
+ * The login identifier: an email address or an E.164 phone number, depending
+ * on which delivery driver is configured. Normalising here — rather than at
+ * each call site — is what keeps the UNIQUE key on `users` meaningful.
+ */
+export interface NormalizedIdentifier {
+  value: string;
+  channel: OtpChannel;
+}
 
-export async function startLogin(rawPhone: string): Promise<StartLoginResult> {
-  const phone = normalizePhone(rawPhone);
-  if (!phone) return { ok: false, reason: "invalid-phone" };
+export function normalizeIdentifier(raw: string): NormalizedIdentifier | null {
+  const channel = otp().channel;
+
+  if (channel === "email") {
+    const email = normalizeEmail(raw);
+    return email ? { value: email, channel: "email" } : null;
+  }
+
+  const phone = normalizePhone(raw);
+  return phone ? { value: phone, channel: "sms" } : null;
+}
+
+/** What the sign-in screen should ask for. */
+export function authChannel(): OtpChannel {
+  return otp().channel;
+}
+
+export type StartLoginResult =
+  | { ok: true; identifier: string; channel: OtpChannel; developmentDriver: boolean }
+  | {
+      ok: false;
+      reason: "invalid-identifier" | "rate-limited" | "delivery-failed";
+      retryAfterSeconds?: number;
+    };
+
+export async function startLogin(raw: string): Promise<StartLoginResult> {
+  const identifier = normalizeIdentifier(raw);
+  if (!identifier) return { ok: false, reason: "invalid-identifier" };
 
   const ip = await requestIp();
 
-  const perPhone = await consumeRateLimit("otpRequest", phone);
-  if (!perPhone.allowed) {
-    return { ok: false, reason: "rate-limited", retryAfterSeconds: perPhone.retryAfterSeconds };
+  const perIdentifier = await consumeRateLimit("otpRequest", identifier.value);
+  if (!perIdentifier.allowed) {
+    return { ok: false, reason: "rate-limited", retryAfterSeconds: perIdentifier.retryAfterSeconds };
   }
 
   if (ip) {
@@ -67,21 +100,22 @@ export async function startLogin(rawPhone: string): Promise<StartLoginResult> {
     }
   }
 
-  // A fixed development code keeps the seeded demo accounts usable without an
-  // SMS gateway. `env` refuses to expose it when NODE_ENV=production.
+  // A fixed development code keeps the seeded demo accounts usable without a
+  // mail server. `env` refuses to expose it when NODE_ENV=production.
   const code = env.otpFixedCode ?? String(randomInt(0, 1_000_000)).padStart(6, "0");
   const salt = randomBytes(16).toString("hex");
 
-  // Older challenges for this number stop being valid the moment a new one is
-  // issued, so a leaked code has a very short life.
+  // Older challenges for this identifier stop being valid the moment a new one
+  // is issued, so a leaked code has a very short life.
   await prisma.otpChallenge.updateMany({
-    where: { phone, consumedAt: null },
+    where: { identifier: identifier.value, consumedAt: null },
     data: { consumedAt: new Date() },
   });
 
   await prisma.otpChallenge.create({
     data: {
-      phone,
+      identifier: identifier.value,
+      channel: identifier.channel === "email" ? "EMAIL" : "SMS",
       codeHash: sha256(`${salt}:${code}`),
       salt,
       expiresAt: new Date(Date.now() + OTP_TTL_MINUTES * 60_000),
@@ -89,35 +123,37 @@ export async function startLogin(rawPhone: string): Promise<StartLoginResult> {
   });
 
   const provider = otp();
-  const delivered = await provider.send(phone, code);
+  const delivered = await provider.send(identifier.value, code);
   if (!delivered) return { ok: false, reason: "delivery-failed" };
 
-  return { ok: true, phone, developmentDriver: provider.isDevelopmentDriver };
+  return {
+    ok: true,
+    identifier: identifier.value,
+    channel: identifier.channel,
+    developmentDriver: provider.isDevelopmentDriver,
+  };
 }
 
 export type VerifyLoginResult =
   | { ok: true; user: User; isNewUser: boolean }
   | {
       ok: false;
-      reason: "invalid-phone" | "invalid-code" | "expired" | "rate-limited" | "suspended";
+      reason: "invalid-identifier" | "invalid-code" | "expired" | "rate-limited" | "suspended";
       retryAfterSeconds?: number;
     };
 
-export async function verifyLogin(
-  rawPhone: string,
-  rawCode: string,
-): Promise<VerifyLoginResult> {
-  const phone = normalizePhone(rawPhone);
-  if (!phone) return { ok: false, reason: "invalid-phone" };
+export async function verifyLogin(raw: string, rawCode: string): Promise<VerifyLoginResult> {
+  const identifier = normalizeIdentifier(raw);
+  if (!identifier) return { ok: false, reason: "invalid-identifier" };
 
-  const limit = await consumeRateLimit("otpVerify", phone);
+  const limit = await consumeRateLimit("otpVerify", identifier.value);
   if (!limit.allowed) {
     return { ok: false, reason: "rate-limited", retryAfterSeconds: limit.retryAfterSeconds };
   }
 
   const code = rawCode.replace(/\D/g, "");
   const challenge = await prisma.otpChallenge.findFirst({
-    where: { phone, consumedAt: null },
+    where: { identifier: identifier.value, consumedAt: null },
     orderBy: { createdAt: "desc" },
   });
 
@@ -142,7 +178,11 @@ export async function verifyLogin(
     data: { consumedAt: new Date() },
   });
 
-  const existing = await prisma.user.findUnique({ where: { phone } });
+  const where =
+    identifier.channel === "email"
+      ? { email: identifier.value }
+      : { phone: identifier.value };
+  const existing = await prisma.user.findUnique({ where });
 
   if (existing) {
     if (existing.status === "BANNED") return { ok: false, reason: "suspended" };
@@ -168,7 +208,7 @@ export async function verifyLogin(
 
   const user = await prisma.user.create({
     data: {
-      phone,
+      ...where,
       // Placeholder until the user picks a name on the next screen.
       displayName: "مستخدم جديد",
       verifiedAt: new Date(),

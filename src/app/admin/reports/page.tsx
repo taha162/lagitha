@@ -3,7 +3,7 @@ import { ar } from "@/i18n/ar";
 import { prisma } from "@/lib/db";
 import { adminReports, ADMIN_PAGE_SIZE } from "@/lib/services/admin";
 import { relativeTime } from "@/lib/time";
-import { maskPhone } from "@/lib/privacy";
+import { maskIdentifier } from "@/lib/privacy";
 import { mediaUrl } from "@/lib/providers/storage";
 import { PageHeader, Panel, DataTable } from "@/components/admin/panel";
 import { Badge, ReportTypeBadge } from "@/components/ui/badge";
@@ -141,7 +141,7 @@ export default async function AdminReportsPage({
                   {/* Staff see a masked number: enough to correlate a support
                       call, not enough to hand out. */}
                   <span className="block text-fine text-muted latin" dir="ltr">
-                    {maskPhone(report.user.phone)}
+                    {maskIdentifier(report.user)}
                   </span>
                 </td>
 
@@ -209,7 +209,7 @@ export default async function AdminReportsPage({
             preciseLat: selected.preciseLat,
             preciseLng: selected.preciseLng,
             authorName: selected.user.displayName,
-            authorPhone: maskPhone(selected.user.phone),
+            authorPhone: maskIdentifier(selected.user),
             createdAt: selected.createdAt.toISOString(),
             viewCount: selected.viewCount,
             flagCount: selected._count.flags,

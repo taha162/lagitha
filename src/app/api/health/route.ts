@@ -160,6 +160,31 @@ function describeOtpProvider(provider: string): Check {
         ? { ok: true, detail: `http gateway — ${describeHost(process.env.SMS_HTTP_URL!)}` }
         : { ok: false, detail: "http selected but SMS_HTTP_URL is not set" };
 
+    case "resend": {
+      const missing = [
+        !nonEmpty(process.env.RESEND_API_KEY) && "RESEND_API_KEY",
+        !nonEmpty(process.env.MAIL_FROM) && "MAIL_FROM",
+      ].filter((value): value is string => Boolean(value));
+
+      return missing.length === 0
+        ? { ok: true, detail: `resend — sending as ${process.env.MAIL_FROM}` }
+        : { ok: false, detail: `resend selected but missing: ${missing.join(", ")}` };
+    }
+
+    case "smtp": {
+      const missing = [
+        !nonEmpty(process.env.SMTP_HOST) && "SMTP_HOST",
+        !nonEmpty(process.env.MAIL_FROM) && "MAIL_FROM",
+      ].filter((value): value is string => Boolean(value));
+
+      return missing.length === 0
+        ? {
+            ok: true,
+            detail: `smtp — ${process.env.SMTP_HOST}:${process.env.SMTP_PORT ?? 587} as ${process.env.MAIL_FROM}`,
+          }
+        : { ok: false, detail: `smtp selected but missing: ${missing.join(", ")}` };
+    }
+
     case "console":
       return {
         ok: false,
@@ -170,7 +195,8 @@ function describeOtpProvider(provider: string): Check {
       return {
         ok: false,
         detail:
-          "no SMS driver — nobody can sign in. Set OTP_PROVIDER to 'twilio' or 'http'.",
+          "no delivery driver — nobody can sign in. Set OTP_PROVIDER to " +
+          "'resend' or 'smtp' (email), or 'twilio' / 'http' (SMS).",
       };
   }
 }

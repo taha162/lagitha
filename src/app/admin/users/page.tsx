@@ -2,7 +2,7 @@ import { ar } from "@/i18n/ar";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { isAdmin } from "@/lib/authz";
-import { maskPhone } from "@/lib/privacy";
+import { maskIdentifier } from "@/lib/privacy";
 import { formatDate, relativeTime } from "@/lib/time";
 import { PageHeader, Panel, DataTable } from "@/components/admin/panel";
 import { Badge } from "@/components/ui/badge";
@@ -55,7 +55,7 @@ export default async function AdminUsersPage({
         <DataTable
           headers={[
             "الاسم",
-            "الهاتف",
+            "المعرّف",
             "الدور",
             "الحالة",
             "بلاغات",
@@ -71,7 +71,7 @@ export default async function AdminUsersPage({
                 <span className="block truncate text-text">{user.displayName}</span>
               </td>
               <td className="px-3 py-2 text-fine text-muted latin whitespace-nowrap" dir="ltr">
-                {maskPhone(user.phone)}
+                {maskIdentifier(user)}
               </td>
               <td className="px-3 py-2">
                 {user.role === "MEMBER" ? (

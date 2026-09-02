@@ -171,14 +171,15 @@ async function seedReferenceData() {
 // Demo content
 // --------------------------------------------------------------------------
 
+/** Login is by email, so demo accounts are keyed on an address. */
 const DEMO_USERS = [
-  { phone: "+9647700000001", displayName: "فريق لَگيتها", role: "ADMIN" as const },
-  { phone: "+9647700000002", displayName: "مشرف المحتوى", role: "MODERATOR" as const },
-  { phone: "+9647700000010", displayName: "أبو أحمد (حساب تجريبي)", role: "MEMBER" as const },
-  { phone: "+9647700000011", displayName: "سارة (حساب تجريبي)", role: "MEMBER" as const },
-  { phone: "+9647700000012", displayName: "عمر (حساب تجريبي)", role: "MEMBER" as const },
-  { phone: "+9647700000013", displayName: "أم يوسف (حساب تجريبي)", role: "MEMBER" as const },
-  { phone: "+9647700000014", displayName: "حيدر (حساب تجريبي)", role: "MEMBER" as const },
+  { email: "admin@lagaitha.local", displayName: "فريق لَگيتها", role: "ADMIN" as const },
+  { email: "mod@lagaitha.local", displayName: "مشرف المحتوى", role: "MODERATOR" as const },
+  { email: "abu.ahmed@lagaitha.local", displayName: "أبو أحمد (حساب تجريبي)", role: "MEMBER" as const },
+  { email: "sara@lagaitha.local", displayName: "سارة (حساب تجريبي)", role: "MEMBER" as const },
+  { email: "omar@lagaitha.local", displayName: "عمر (حساب تجريبي)", role: "MEMBER" as const },
+  { email: "um.yousif@lagaitha.local", displayName: "أم يوسف (حساب تجريبي)", role: "MEMBER" as const },
+  { email: "haidar@lagaitha.local", displayName: "حيدر (حساب تجريبي)", role: "MEMBER" as const },
 ];
 
 interface DemoReport {
@@ -365,10 +366,10 @@ async function seedDemoData() {
   for (const demoUser of DEMO_USERS) {
     users.push(
       await prisma.user.upsert({
-        where: { phone: demoUser.phone },
+        where: { email: demoUser.email },
         update: { displayName: demoUser.displayName, role: demoUser.role },
         create: {
-          phone: demoUser.phone,
+          email: demoUser.email,
           displayName: demoUser.displayName,
           role: demoUser.role,
           verifiedAt: new Date(),
@@ -445,7 +446,7 @@ async function seedDemoData() {
   console.info(`  ✓ ${created} بلاغ تجريبي`);
   if (created > 0) {
     console.info("\n  البيانات التجريبية موسومة بـ (حساب تجريبي) في اسم صاحب البلاغ.");
-    console.info("  للدخول: أي رقم من الأرقام أعلاه + الرمز في OTP_DEV_FIXED_CODE.\n");
+    console.info("  للدخول: أي بريد من العناوين أعلاه + الرمز في OTP_DEV_FIXED_CODE.\n");
   }
 }
 

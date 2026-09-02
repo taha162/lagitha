@@ -39,14 +39,18 @@ export default async function AccountPage() {
       <section className="rounded-md border border-border bg-surface divide-y divide-border">
         <div className="px-4 py-3">
           <dl className="space-y-2.5">
+            {/* The owner sees their own identifier in full — this is the one
+                place it is not masked. */}
             <div className="flex items-center justify-between gap-3">
-              <dt className="text-meta text-muted">{ar.account.phone}</dt>
+              <dt className="text-meta text-muted">
+                {user.email ? ar.auth.emailLabel : ar.account.phone}
+              </dt>
               <dd className="text-meta text-text latin" dir="ltr">
-                {formatPhoneForDisplay(user.phone)}
+                {user.email ?? (user.phone ? formatPhoneForDisplay(user.phone) : "—")}
               </dd>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <dt className="text-fine text-muted">{ar.account.phonePrivate}</dt>
+              <dt className="text-fine text-muted">{ar.account.contactPrivate}</dt>
               <dd />
             </div>
             <div className="flex items-center justify-between gap-3">

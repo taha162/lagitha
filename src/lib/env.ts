@@ -97,8 +97,28 @@ export const env = {
     "dev-only-change-me-dev-only-change-me-dev-only-1234",
   ),
 
-  /** twilio | http | console | disabled — see src/lib/providers/otp.ts */
+  /** resend | smtp | twilio | http | console | disabled — see providers/otp.ts */
   otpProvider: optional("OTP_PROVIDER", isProduction ? "disabled" : "console"),
+  /**
+   * Which identifier the sign-in screen asks for when the driver does not
+   * imply one (console / disabled). A real driver always wins.
+   */
+  authChannel: optional("AUTH_CHANNEL", "email"),
+
+  resend: {
+    apiKey: process.env.RESEND_API_KEY,
+    from: process.env.MAIL_FROM,
+  },
+
+  smtp: {
+    host: process.env.SMTP_HOST,
+    port: integer("SMTP_PORT", 587),
+    // Port 465 is implicit TLS; 587 upgrades with STARTTLS after connecting.
+    secure: optional("SMTP_SECURE", integer("SMTP_PORT", 587) === 465 ? "true" : "false") === "true",
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+    from: process.env.MAIL_FROM,
+  },
   /** Development shortcut so demo accounts can sign in without an SMS gateway. */
   otpFixedCode: isProduction ? undefined : process.env.OTP_DEV_FIXED_CODE,
 

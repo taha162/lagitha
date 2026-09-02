@@ -154,11 +154,68 @@ describe("twilio driver", () => {
   });
 });
 
+describe("email drivers", () => {
+  it("posts the code to Resend with an Arabic RTL body", async () => {
+    const provider = await loadOtp({
+      OTP_PROVIDER: "resend",
+      RESEND_API_KEY: "re_test",
+      MAIL_FROM: "LAGAITHA <no-reply@lagaitha.iq>",
+    });
+
+    expect(provider.name).toBe("resend");
+    expect(provider.channel).toBe("email");
+  });
+
+  it("falls back to disabled when Resend is missing a key or sender", async () => {
+    expect((await loadOtp({ OTP_PROVIDER: "resend", RESEND_API_KEY: "", MAIL_FROM: "" })).name).toBe(
+      "disabled",
+    );
+  });
+
+  it("selects SMTP once a host and sender are present", async () => {
+    const provider = await loadOtp({
+      OTP_PROVIDER: "smtp",
+      SMTP_HOST: "smtp.gmail.com",
+      SMTP_PORT: "587",
+      MAIL_FROM: "LAGAITHA <lagaitha@gmail.com>",
+    });
+
+    expect(provider.name).toBe("smtp");
+    expect(provider.channel).toBe("email");
+  });
+
+  it("falls back to disabled when SMTP has no host", async () => {
+    expect((await loadOtp({ OTP_PROVIDER: "smtp", SMTP_HOST: "", MAIL_FROM: "a@b.com" })).name).toBe(
+      "disabled",
+    );
+  });
+
+  it("renders the code and Arabic copy into both text and HTML parts", async () => {
+    const { renderOtpEmail } = await import("@/lib/providers/otp-email");
+    const { subject, text, html } = renderOtpEmail("482913");
+
+    expect(subject).toContain("482913");
+    expect(text).toContain("482913");
+    expect(html).toContain("482913");
+    // Mail clients need dir="rtl" on the root; Arabic lays out wrong without it.
+    expect(html).toContain('dir="rtl"');
+    expect(html).toContain("لَگيتها");
+    // No tracking pixels, no links to click — a login code and nothing else.
+    expect(html).not.toContain("<a ");
+  });
+});
+
 describe("driver selection", () => {
   it("defaults to console outside production, so development needs no gateway", async () => {
     const provider = await loadOtp({ OTP_PROVIDER: "" });
     expect(provider.name).toBe("console");
     expect(provider.isDevelopmentDriver).toBe(true);
+  });
+
+  it("asks for an email by default, and a phone number when AUTH_CHANNEL=sms", async () => {
+    expect((await loadOtp({ OTP_PROVIDER: "console" })).channel).toBe("email");
+    vi.resetModules();
+    expect((await loadOtp({ OTP_PROVIDER: "console", AUTH_CHANNEL: "sms" })).channel).toBe("sms");
   });
 
   it("defaults to disabled in production, rather than logging codes", async () => {

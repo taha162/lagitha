@@ -38,16 +38,57 @@ startup if it is missing or wrong. Before going live you must set:
 Set `SITE_NOINDEX=1` on staging. It switches `robots.txt` to disallow
 everything and empties the sitemap.
 
-### Sending the login code (SMS)
+### Sending the login code
 
-Nobody can sign in until an SMS driver is configured. `OTP_PROVIDER` selects it:
+Nobody can sign in until a delivery driver is configured. `OTP_PROVIDER`
+selects it, and the driver decides whether the sign-in screen asks for an
+email address or a phone number:
 
-| value | use |
-|---|---|
-| `twilio` | real SMS, works internationally including Iraq |
-| `http` | any gateway with a plain HTTP API — most local Iraqi aggregators |
-| `console` | prints the code to the server log; **development only**, refused at startup in production |
-| `disabled` | login is refused with a clear message (the default) |
+| value | channel | use |
+|---|---|---|
+| `smtp` | email | Gmail, Brevo, any SMTP host. **Free, no domain needed** |
+| `resend` | email | best deliverability, requires a verified domain |
+| `twilio` | SMS | works internationally including Iraq (paid) |
+| `http` | SMS | any gateway with a plain HTTP API — local Iraqi aggregators |
+| `console` | either | prints the code to the server log; **development only**, refused at startup in production |
+| `disabled` | either | login is refused with a clear message (the default) |
+
+**SMTP — the free path**
+
+```
+OTP_PROVIDER=smtp
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASS=xxxx xxxx xxxx xxxx     # a Gmail App Password, not your password
+MAIL_FROM=لَگيتها <you@gmail.com>
+```
+
+Gmail requires 2-factor authentication on the account before it will issue an
+App Password, and caps sending at roughly 500 a day. Brevo
+(`smtp-relay.brevo.com`) allows 300 a day free and lets you verify a single
+sender address rather than a whole domain — useful before you own a domain.
+
+Deliverability is the thing to watch: a code sent from a free Gmail address
+lands in spam more often than one from a verified domain. The code screen
+tells users to check their spam folder for exactly this reason. Move to
+`resend` with your own domain once you have one.
+
+**Resend — once you own a domain**
+
+```
+OTP_PROVIDER=resend
+RESEND_API_KEY=re_xxxxxxxx
+MAIL_FROM=لَگيتها <no-reply@yourdomain.iq>
+```
+
+Verify the domain in the Resend dashboard first; until you do, it will only
+deliver to the address you signed up with.
+
+**A note on the choice.** Email was chosen over SMS because SMS is never free —
+carriers bill for every message. The cost is reach: some of the people this
+platform is for will report a lost item from a phone without using email. The
+SMS drivers below remain wired up and tested; switching is one variable.
 
 **Twilio**
 

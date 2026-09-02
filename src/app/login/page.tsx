@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ar } from "@/i18n/ar";
-import { getCurrentUser } from "@/lib/auth";
+import { authChannel, getCurrentUser } from "@/lib/auth";
 import { BrandLockup } from "@/components/brand";
 import { LoginForm } from "./login-form";
 
@@ -35,6 +35,7 @@ export default async function LoginPage({
           <LoginForm
             next={next ?? "/"}
             startAtProfile={Boolean(user && user.displayName === "مستخدم جديد")}
+            channel={authChannel()}
           />
 
           <p className="mt-8 text-fine text-muted text-center leading-relaxed">

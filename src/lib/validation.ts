@@ -3,6 +3,7 @@ import { ar } from "@/i18n/ar";
 import { COLORS } from "./attributes";
 import { MOSUL_BOUNDS } from "./geo";
 import { normalizePhone } from "./phone";
+import { normalizeEmail } from "./email";
 
 /**
  * Server-side validation schemas.
@@ -26,6 +27,32 @@ export const phoneSchema = z
     return normalized;
   });
 
+export const emailSchema = z
+  .string()
+  .trim()
+  .transform((value, ctx) => {
+    const normalized = normalizeEmail(value);
+    if (!normalized) {
+      ctx.addIssue({ code: "custom", message: ar.errors.invalidEmail });
+      return z.NEVER;
+    }
+    return normalized;
+  });
+
+/**
+ * The login field. Accepts whichever identifier the configured channel uses,
+ * so the same schema serves an email deployment and an SMS one — the server
+ * decides, not the browser.
+ */
+export const identifierSchema = z
+  .string()
+  .trim()
+  .min(1, ar.errors.required)
+  .max(254, ar.errors.tooLong(254))
+  .refine((value) => normalizeEmail(value) !== null || normalizePhone(value) !== null, {
+    message: ar.errors.invalidIdentifier,
+  });
+
 export const otpCodeSchema = z
   .string()
   .trim()
@@ -40,10 +67,10 @@ export const displayNameSchema = z
   .refine((value) => !/https?:\/\//i.test(value), { message: ar.errors.validation })
   .refine((value) => !/\d{7,}/.test(value), { message: ar.errors.validation });
 
-export const startLoginSchema = z.object({ phone: phoneSchema });
+export const startLoginSchema = z.object({ identifier: identifierSchema });
 
 export const verifyLoginSchema = z.object({
-  phone: phoneSchema,
+  identifier: identifierSchema,
   code: otpCodeSchema,
 });
 

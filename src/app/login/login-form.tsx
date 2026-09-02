@@ -18,26 +18,42 @@ import {
  * for an email address and a password before they can say so.
  */
 type Step =
-  | { name: "phone" }
-  | { name: "code"; phone: string; display: string; devDriver: boolean }
+  | { name: "identifier" }
+  | { name: "code"; identifier: string; display: string; devDriver: boolean }
   | { name: "profile" };
 
-export function LoginForm({ next, startAtProfile }: { next: string; startAtProfile: boolean }) {
+export function LoginForm({
+  next,
+  startAtProfile,
+  channel,
+}: {
+  next: string;
+  startAtProfile: boolean;
+  channel: "email" | "sms";
+}) {
   const router = useRouter();
-  const [step, setStep] = useState<Step>(startAtProfile ? { name: "profile" } : { name: "phone" });
+  const [step, setStep] = useState<Step>(
+    startAtProfile ? { name: "profile" } : { name: "identifier" },
+  );
 
-  if (step.name === "phone") {
-    return <PhoneStep onSent={(data) => setStep({ name: "code", ...data })} />;
+  if (step.name === "identifier") {
+    return (
+      <IdentifierStep
+        channel={channel}
+        onSent={(data) => setStep({ name: "code", ...data })}
+      />
+    );
   }
 
   if (step.name === "code") {
     return (
       <CodeStep
-        phone={step.phone}
+        identifier={step.identifier}
         display={step.display}
         devDriver={step.devDriver}
+        channel={channel}
         next={next}
-        onBack={() => setStep({ name: "phone" })}
+        onBack={() => setStep({ name: "identifier" })}
         onVerified={(isNewUser, target) => {
           if (isNewUser) setStep({ name: "profile" });
           else router.replace(target);
@@ -56,10 +72,12 @@ export function LoginForm({ next, startAtProfile }: { next: string; startAtProfi
   );
 }
 
-function PhoneStep({
+function IdentifierStep({
+  channel,
   onSent,
 }: {
-  onSent: (data: { phone: string; display: string; devDriver: boolean }) => void;
+  channel: "email" | "sms";
+  onSent: (data: { identifier: string; display: string; devDriver: boolean }) => void;
 }) {
   const [state, action, pending] = useActionState(requestCodeAction, undefined);
 
@@ -71,20 +89,26 @@ function PhoneStep({
     <form action={action} className="space-y-5">
       <div>
         <h1 className="text-h1 text-text-strong">{ar.auth.title}</h1>
-        <p className="mt-1.5 text-meta text-muted leading-relaxed">{ar.auth.subtitle}</p>
+        <p className="mt-1.5 text-meta text-muted leading-relaxed">
+          {channel === "email" ? ar.auth.subtitle : ar.auth.subtitleSms}
+        </p>
       </div>
 
+      {/* The identifier is always typed left-to-right, whichever channel it is. */}
       <TextField
-        name="phone"
-        type="tel"
-        inputMode="tel"
-        autoComplete="tel"
+        name="identifier"
+        type={channel === "email" ? "email" : "tel"}
+        inputMode={channel === "email" ? "email" : "tel"}
+        autoComplete={channel === "email" ? "email" : "tel"}
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
         dir="ltr"
         className="text-start latin"
-        label={ar.auth.phoneLabel}
-        placeholder={ar.auth.phonePlaceholder}
-        hint={ar.auth.phoneHint}
-        error={state && !state.ok && state.field === "phone" ? state.error : undefined}
+        label={channel === "email" ? ar.auth.emailLabel : ar.auth.phoneLabel}
+        placeholder={channel === "email" ? ar.auth.emailPlaceholder : ar.auth.phonePlaceholder}
+        hint={channel === "email" ? ar.auth.emailHint : ar.auth.phoneHint}
+        error={state && !state.ok && state.field === "identifier" ? state.error : undefined}
         required
         autoFocus
       />
@@ -112,16 +136,18 @@ function PhoneStep({
 const RESEND_SECONDS = 45;
 
 function CodeStep({
-  phone,
+  identifier,
   display,
   devDriver,
+  channel,
   next,
   onBack,
   onVerified,
 }: {
-  phone: string;
+  identifier: string;
   display: string;
   devDriver: boolean;
+  channel: "email" | "sms";
   next: string;
   onBack: () => void;
   onVerified: (isNewUser: boolean, next: string) => void;
@@ -146,7 +172,7 @@ function CodeStep({
 
   return (
     <form action={action} className="space-y-5">
-      <input type="hidden" name="phone" value={phone} />
+      <input type="hidden" name="identifier" value={identifier} />
       <input type="hidden" name="next" value={next} />
 
       <div>
@@ -155,6 +181,9 @@ function CodeStep({
           {ar.auth.codeSubtitle("")}
           <span dir="ltr" className="latin"> {display}</span>
         </p>
+        {channel === "email" && (
+          <p className="mt-2 text-fine text-muted">{ar.auth.checkSpam}</p>
+        )}
       </div>
 
       {devDriver && (
