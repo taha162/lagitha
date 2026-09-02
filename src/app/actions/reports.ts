@@ -11,6 +11,7 @@ import {
   ReportLimitError,
 } from "@/lib/services/reports";
 import { runMatchingForReport, dismissMatch } from "@/lib/services/matching";
+import { canPublish } from "@/lib/services/identity";
 import { openRecovery } from "@/lib/services/recovery";
 import {
   createFlagSchema,
@@ -37,6 +38,17 @@ export async function createReportAction(
     user = await requireUser();
   } catch {
     return { ok: false, error: ar.errors.unauthorized };
+  }
+
+  // The wizard page redirects an unverified account before it opens, but a
+  // server action is a public endpoint: the gate has to be closed here too, or
+  // it is not a gate.
+  const gate = await canPublish(user.id);
+  if (!gate.allowed) {
+    return {
+      ok: false,
+      error: gate.reason === "rejected" ? ar.identity.blockedBody : ar.identity.gateBody,
+    };
   }
 
   const parsed = createReportSchema.safeParse(input);

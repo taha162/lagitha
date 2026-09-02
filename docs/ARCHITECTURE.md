@@ -223,23 +223,105 @@ recorded.
 
 ## 9. Authentication
 
-Phone plus a one-time code.
+An account is created once — name, address, password — with a one-time code in
+the middle to prove the address exists. After that, signing in is the password.
 
-- Email is the wrong identifier for this audience; a password is one more thing
-  to lose.
+The one-time code did not go away, it moved. One delivery mechanism, three
+purposes, and the purpose is part of the lookup, so a code issued to confirm an
+address cannot be redeemed to reset a password:
+
+| purpose | used for |
+|---|---|
+| `SIGNUP` | proving the address is real, once |
+| `PASSWORD_RESET` | choosing a new password without an old one |
+| `LOGIN` | accounts with no password set — created before passwords existed, or by staff |
+
+**Why both.** A code-only flow means every sign-in waits on an inbox: the
+person reporting a lost wallet from a borrowed phone has to open mail they may
+not have access to. A password-only flow means an unverified address can hold
+an account, and a forgotten password has no way back. Each covers the other's
+failure.
+
+**The sign-up payload lives on the challenge, not on `users`.** The display
+name and the already-hashed password ride on the `OtpChallenge` row until the
+address answers. Until then the address has not earned the unique key, so a
+sign-up nobody finishes cannot park on someone else's address, and there are no
+half-built accounts to clean up. The payload is cleared by the same write that
+spends the code.
+
+**Passwords** are scrypt (RFC 7914) from Node's own crypto module, at
+N=16384, r=8, p=1 — roughly 100 ms and 64 MB per verification. Not bcrypt or
+argon2: both are native addons, and this application already pays that cost
+once for sharp; a second one is another thing that can fail to build on a host
+we do not control, for a primitive the standard library already implements. The
+digest is self-describing (`scrypt$N$r$p$salt$hash`), so the parameters can be
+raised later without invalidating anyone's password — `needsRehash` upgrades a
+digest transparently on the next successful sign-in.
+
+The strength rule is length plus variety plus a common-password list, and
+deliberately *not* a character-class checklist: requiring a symbol produces
+`Password1!`, which is long enough to look strong and first in every cracking
+dictionary.
+
+**What the screens refuse to reveal.** A wrong password and an address with no
+account produce the same sentence. The forgotten-password screen reports
+success for an address that has no account, and sends nothing. Neither form can
+be used to find out who has an account here.
+
 - Sessions are opaque 32-byte random tokens stored as SHA-256 hashes. The raw
   token exists only in the user's cookie, and any session can be revoked
   server-side — which a stateless JWT cannot do. Suspending an account deletes
   its sessions in the same transaction, so the action takes effect immediately
-  rather than at the next token expiry.
+  rather than at the next token expiry. Resetting a password does the same, so
+  whoever knew the old one loses access at that moment.
 - IP addresses are stored hashed. They are needed for abuse limits, not
   identity.
-- No profile is required to file a report beyond a display name, which need not
-  be a real one.
+- The profile photo and neighbourhood collected at sign-up are both optional,
+  and the neighbourhood is coarsened to the same ~300 m grid as a report before
+  it is stored. The platform has no business knowing which house someone lives
+  in.
 
-Not NextAuth: the flow is phone-OTP-first with no email and no OAuth provider,
-which is most of what that library brings, and DB-backed sessions were wanted
-anyway for revocation.
+Not NextAuth: there is no OAuth provider, the code channel is
+deployment-configurable (email or SMS), and DB-backed revocable sessions were
+wanted anyway — which is most of what that library would have brought.
+
+---
+
+## 9a. Identity verification
+
+Publishing a report requires a national ID card (البطاقة الموحدة) behind the
+account: both sides, uploaded once, reviewed by a person.
+
+**The gate is "submitted and not rejected", not "approved".** Blocking every
+report until a human has looked at a card would mean a wallet lost at midnight
+cannot be reported until the morning, which is the opposite of what this
+product is for. The deterrent is having handed over a real identity, not the
+review having finished. A card that turns out to be false takes the account's
+ability to publish with it *and* pulls its live reports back into
+`UNDER_REVIEW` — the consequence is retroactive rather than pre-emptive.
+
+This is the one place the V1 exclusion list moved: §12 still rules out
+*automatic* identity verification. What is built is the opposite of automatic —
+a person comparing a photograph with a name.
+
+**These are the most sensitive images the platform will ever hold, so the
+design is built around getting rid of them:**
+
+1. They are stored under an `identity/` key prefix. `mediaUrl` throws rather
+   than building a public URL for that prefix, and `/api/media` — which is
+   deliberately unauthenticated, because a photo on a public report is public —
+   refuses it outright. Holding the key is not authorisation.
+2. The only way to read one is a staff route that checks a role and writes an
+   `AdminAction` naming the viewer *before* it reads a byte. Opening someone's
+   ID card is an event, not a page view.
+3. The images are deleted in the same step that records the decision — not by a
+   scheduled job that might not run. A verified account keeps a decision and a
+   date, never the document. `purgeDecidedIdentityImages()` exists only to
+   sweep up after a storage outage mid-decision.
+4. The card *number* is never asked for and has no column. A number we do not
+   collect cannot leak.
+
+What another user ever sees of all this is one boolean on the report author.
 
 ---
 
@@ -284,7 +366,7 @@ progress events and only XHR reports them.
 | Push notifications | needs a service worker, key pair, delivery service and a permission prompt; changes nothing about whether the product works. In-app notifications carry a structured payload, so adding push later is a transport, not a migration. |
 | Native apps | the web app is the product; a wrapper adds two store review queues |
 | Government / police integration | no such API exists to integrate with |
-| Facial recognition, automatic ID verification | not available, and not appropriate for a civic tool handling lost documents |
+| Facial recognition, *automatic* ID verification | not available, and not appropriate for a civic tool handling lost documents. Identity cards are checked by a person instead — see §9a. |
 | Live video, blockchain, real-time tracking | solve no problem this product has |
 | A background job queue | matching is bounded and arithmetic; running it inline means the user sees the result on the confirmation screen instead of us operating a worker. `runMatchingForReport` is the single place to move behind a queue if the corpus outgrows it. |
 | A charting library | the admin has one bar list and one column chart, both a few lines of CSS, both with an accessible table underneath |
@@ -306,5 +388,10 @@ progress events and only XHR reports them.
 - **Geocoding is a nearest-centroid lookup** over 51 seeded neighbourhoods.
   Deliberate — it is exactly the granularity we are allowed to publish — but a
   pin more than 6 km from any of them gets no area name rather than a wrong one.
+- **Identity review is a person, and does not scale on its own.** One
+  moderator can clear a queue of tens per shift, not thousands. The gate lets a
+  queued card publish precisely so that a backlog delays trust rather than the
+  product; if submissions outpace reviewers for long, the honest options are
+  more reviewers or a narrower gate, not a model.
 - **`prisma generate` must run before typechecking** a fresh clone, since the
   client is generated into `src/generated/`. `npm run build` does this.

@@ -14,6 +14,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 import { buildSearchText } from "../src/lib/arabic";
 import { coarsenPoint, formatAreaLabel } from "../src/lib/geo";
 import { generateReference } from "../src/lib/utils";
+import { hashPassword } from "../src/lib/password";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -172,6 +173,8 @@ async function seedReferenceData() {
 // --------------------------------------------------------------------------
 
 /** Login is by email, so demo accounts are keyed on an address. */
+const DEMO_PASSWORD = "lagaitha-demo-2026";
+
 const DEMO_USERS = [
   { email: "admin@lagaitha.local", displayName: "فريق لَگيتها", role: "ADMIN" as const },
   { email: "mod@lagaitha.local", displayName: "مشرف المحتوى", role: "MODERATOR" as const },
@@ -362,22 +365,44 @@ async function seedDemoData() {
     return;
   }
 
+  // Every demo account shares one password, printed at the end of the run.
+  // Hashed through the same function the application uses, so the sign-in path
+  // exercised in development is the real one.
+  const passwordHash = await hashPassword(DEMO_PASSWORD);
+
   const users = [];
   for (const demoUser of DEMO_USERS) {
-    users.push(
-      await prisma.user.upsert({
-        where: { email: demoUser.email },
-        update: { displayName: demoUser.displayName, role: demoUser.role },
-        create: {
-          email: demoUser.email,
-          displayName: demoUser.displayName,
-          role: demoUser.role,
-          verifiedAt: new Date(),
-        },
-      }),
-    );
+    const user = await prisma.user.upsert({
+      where: { email: demoUser.email },
+      update: { displayName: demoUser.displayName, role: demoUser.role, passwordHash },
+      create: {
+        email: demoUser.email,
+        displayName: demoUser.displayName,
+        role: demoUser.role,
+        passwordHash,
+        verifiedAt: new Date(),
+      },
+    });
+
+    // Demo accounts publish reports, and publishing needs a verified identity.
+    // The record carries no image: it is created already decided and already
+    // purged, which is exactly the shape a real approved verification has once
+    // the reviewer is done with it.
+    await prisma.identityVerification.upsert({
+      where: { userId: user.id },
+      update: {},
+      create: {
+        userId: user.id,
+        status: "APPROVED",
+        cardName: demoUser.displayName,
+        reviewedAt: new Date(),
+        purgedAt: new Date(),
+      },
+    });
+
+    users.push(user);
   }
-  console.info(`  ✓ ${users.length} حساب تجريبي`);
+  console.info(`  ✓ ${users.length} حساب تجريبي (كلمة المرور: ${DEMO_PASSWORD})`);
 
   const categories = new Map(
     (await prisma.category.findMany()).map((category) => [category.slug, category]),

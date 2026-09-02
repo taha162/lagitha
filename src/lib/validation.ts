@@ -4,6 +4,11 @@ import { COLORS } from "./attributes";
 import { MOSUL_BOUNDS } from "./geo";
 import { normalizePhone } from "./phone";
 import { normalizeEmail } from "./email";
+import {
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  checkPasswordStrength,
+} from "./password-rules";
 
 /**
  * Server-side validation schemas.
@@ -14,6 +19,18 @@ import { normalizeEmail } from "./email";
  */
 
 const COLOR_VALUES = COLORS.map((color) => color.value) as [string, ...string[]];
+
+/** Shared by the report wizard and the sign-up location step. */
+const coordinateSchema = z.object({
+  lat: z
+    .number()
+    .min(MOSUL_BOUNDS.minLat, "الموقع خارج نطاق الخدمة.")
+    .max(MOSUL_BOUNDS.maxLat, "الموقع خارج نطاق الخدمة."),
+  lng: z
+    .number()
+    .min(MOSUL_BOUNDS.minLng, "الموقع خارج نطاق الخدمة.")
+    .max(MOSUL_BOUNDS.maxLng, "الموقع خارج نطاق الخدمة."),
+});
 
 export const phoneSchema = z
   .string()
@@ -67,6 +84,28 @@ export const displayNameSchema = z
   .refine((value) => !/https?:\/\//i.test(value), { message: ar.errors.validation })
   .refine((value) => !/\d{7,}/.test(value), { message: ar.errors.validation });
 
+/**
+ * Password rules live in `src/lib/password.ts`; this maps the failure to the
+ * sentence the person reads. The value is deliberately not trimmed — a leading
+ * or trailing space is part of a password someone chose.
+ */
+export const passwordSchema = z.string().superRefine((value, ctx) => {
+  const problem = checkPasswordStrength(value);
+  if (!problem) return;
+
+  ctx.addIssue({
+    code: "custom",
+    message:
+      problem === "too-short"
+        ? ar.errors.passwordShort(PASSWORD_MIN_LENGTH)
+        : problem === "too-long"
+          ? ar.errors.tooLong(PASSWORD_MAX_LENGTH)
+          : problem === "too-common"
+            ? ar.errors.passwordCommon
+            : ar.errors.passwordWeak,
+  });
+});
+
 export const startLoginSchema = z.object({ identifier: identifierSchema });
 
 export const verifyLoginSchema = z.object({
@@ -74,20 +113,89 @@ export const verifyLoginSchema = z.object({
   code: otpCodeSchema,
 });
 
+export const passwordLoginSchema = z.object({
+  identifier: identifierSchema,
+  // Not `passwordSchema`: signing in must accept whatever is typed and let the
+  // comparison fail. Applying strength rules here would tell an attacker which
+  // guesses are not worth making.
+  password: z.string().min(1, ar.errors.required).max(PASSWORD_MAX_LENGTH),
+});
+
+export const startSignupSchema = z
+  .object({
+    identifier: identifierSchema,
+    displayName: displayNameSchema,
+    password: passwordSchema,
+    passwordConfirm: z.string(),
+  })
+  .refine((value) => value.password === value.passwordConfirm, {
+    message: ar.errors.passwordMismatch,
+    path: ["passwordConfirm"],
+  });
+
+export const completeSignupSchema = z.object({
+  identifier: identifierSchema,
+  code: otpCodeSchema,
+});
+
+export const startPasswordResetSchema = z.object({ identifier: identifierSchema });
+
+export const completePasswordResetSchema = z
+  .object({
+    identifier: identifierSchema,
+    code: otpCodeSchema,
+    password: passwordSchema,
+    passwordConfirm: z.string(),
+  })
+  .refine((value) => value.password === value.passwordConfirm, {
+    message: ar.errors.passwordMismatch,
+    path: ["passwordConfirm"],
+  });
+
 export const completeProfileSchema = z.object({ displayName: displayNameSchema });
 
-// --------------------------------------------------------------- reports ---
-
-const coordinateSchema = z.object({
-  lat: z
-    .number()
-    .min(MOSUL_BOUNDS.minLat, "الموقع خارج نطاق الخدمة.")
-    .max(MOSUL_BOUNDS.maxLat, "الموقع خارج نطاق الخدمة."),
-  lng: z
-    .number()
-    .min(MOSUL_BOUNDS.minLng, "الموقع خارج نطاق الخدمة.")
-    .max(MOSUL_BOUNDS.maxLng, "الموقع خارج نطاق الخدمة."),
+/**
+ * The last sign-up screen: a photo and roughly where the person is. Both are
+ * optional — neither is needed to file a report, and a blocked "finish" button
+ * over a profile picture would be an odd place to lose someone.
+ */
+export const profileSetupSchema = z.object({
+  areaSlug: z
+    .string()
+    .trim()
+    .max(60)
+    .optional()
+    .transform((value) => (value ? value : undefined)),
+  point: coordinateSchema.optional(),
 });
+
+// ------------------------------------------------------------- identity ----
+
+/**
+ * The national ID card. The card *number* is deliberately not a field: the
+ * check is a person comparing the photo with the name on the account, and a
+ * number we never collect is a number that cannot leak.
+ */
+export const submitIdentitySchema = z.object({
+  cardName: z
+    .string()
+    .trim()
+    .min(4, ar.errors.tooShort(4))
+    .max(80, ar.errors.tooLong(80)),
+});
+
+export const decideIdentitySchema = z
+  .object({
+    verificationId: z.string().trim().min(1),
+    decision: z.enum(["APPROVED", "REJECTED"]),
+    note: z.string().trim().max(300).optional(),
+  })
+  .refine((value) => value.decision !== "REJECTED" || Boolean(value.note), {
+    message: ar.identity.rejectReasonRequired,
+    path: ["note"],
+  });
+
+// --------------------------------------------------------------- reports ---
 
 export const whenPresetSchema = z.enum(["today", "yesterday", "this-week", "exact"]);
 

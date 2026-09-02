@@ -2,10 +2,11 @@ import "server-only";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
-import type { User } from "@/generated/prisma/client";
+import type { OtpPurpose, User } from "@/generated/prisma/client";
 import { prisma } from "./db";
 import { env } from "./env";
 import { otp } from "./providers/otp";
+import { hashPassword, needsRehash, verifyPassword } from "./password";
 import { consumeRateLimit } from "./rate-limit";
 import { normalizePhone } from "./phone";
 import { normalizeEmail } from "./email";
@@ -14,9 +15,16 @@ import type { OtpChannel } from "./providers/otp";
 /**
  * Authentication.
  *
- * Phone + one-time code, because the target audience has phones and not
- * necessarily email, and because a password is one more thing to lose. There
- * is no password to leak and nothing to reset.
+ * An account is created once, deliberately: address, name and a password, with
+ * a one-time code in the middle to prove the address exists. After that,
+ * signing in is the password — a person reporting a lost wallet from a borrowed
+ * phone should not have to wait for an email to arrive.
+ *
+ * The one-time code did not go away, it moved: it proves the address at sign-up,
+ * it resets a forgotten password, and it still signs in the accounts that
+ * predate passwords (`passwordHash` is null for those). One delivery mechanism,
+ * three purposes, and the purpose is part of the lookup — a code issued to
+ * confirm an address must not be redeemable to reset a password.
  *
  * Sessions are opaque random tokens stored as SHA-256 hashes: the raw token
  * exists only in the user's cookie, and any session can be revoked server-side
@@ -74,25 +82,35 @@ export function authChannel(): OtpChannel {
   return otp().channel;
 }
 
-export type StartLoginResult =
+/** Where a normalised identifier lives on `users`. */
+function identifierWhere(identifier: NormalizedIdentifier) {
+  return identifier.channel === "email"
+    ? { email: identifier.value }
+    : { phone: identifier.value };
+}
+
+export type SendCodeResult =
   | { ok: true; identifier: string; channel: OtpChannel; developmentDriver: boolean }
-  | {
-      ok: false;
-      reason: "invalid-identifier" | "rate-limited" | "delivery-failed";
-      retryAfterSeconds?: number;
-    };
+  | { ok: false; reason: "rate-limited" | "delivery-failed"; retryAfterSeconds?: number };
 
-export async function startLogin(raw: string): Promise<StartLoginResult> {
-  const identifier = normalizeIdentifier(raw);
-  if (!identifier) return { ok: false, reason: "invalid-identifier" };
-
-  const ip = await requestIp();
-
+/**
+ * Issues and delivers a code for one purpose.
+ *
+ * Older unconsumed challenges for the same identifier and purpose are burned
+ * first, so a leaked code has a very short life, and a resend cannot leave two
+ * valid codes in flight.
+ */
+async function sendCode(
+  identifier: NormalizedIdentifier,
+  purpose: OtpPurpose,
+  payload?: Record<string, unknown>,
+): Promise<SendCodeResult> {
   const perIdentifier = await consumeRateLimit("otpRequest", identifier.value);
   if (!perIdentifier.allowed) {
     return { ok: false, reason: "rate-limited", retryAfterSeconds: perIdentifier.retryAfterSeconds };
   }
 
+  const ip = await requestIp();
   if (ip) {
     const perIp = await consumeRateLimit("otpRequestPerIp", hashIp(ip)!);
     if (!perIp.allowed) {
@@ -105,10 +123,8 @@ export async function startLogin(raw: string): Promise<StartLoginResult> {
   const code = env.otpFixedCode ?? String(randomInt(0, 1_000_000)).padStart(6, "0");
   const salt = randomBytes(16).toString("hex");
 
-  // Older challenges for this identifier stop being valid the moment a new one
-  // is issued, so a leaked code has a very short life.
   await prisma.otpChallenge.updateMany({
-    where: { identifier: identifier.value, consumedAt: null },
+    where: { identifier: identifier.value, purpose, consumedAt: null },
     data: { consumedAt: new Date() },
   });
 
@@ -116,8 +132,10 @@ export async function startLogin(raw: string): Promise<StartLoginResult> {
     data: {
       identifier: identifier.value,
       channel: identifier.channel === "email" ? "EMAIL" : "SMS",
+      purpose,
       codeHash: sha256(`${salt}:${code}`),
       salt,
+      payload: (payload ?? undefined) as never,
       expiresAt: new Date(Date.now() + OTP_TTL_MINUTES * 60_000),
     },
   });
@@ -134,18 +152,16 @@ export async function startLogin(raw: string): Promise<StartLoginResult> {
   };
 }
 
-export type VerifyLoginResult =
-  | { ok: true; user: User; isNewUser: boolean }
-  | {
-      ok: false;
-      reason: "invalid-identifier" | "invalid-code" | "expired" | "rate-limited" | "suspended";
-      retryAfterSeconds?: number;
-    };
+type ConsumeCodeResult =
+  | { ok: true; payload: Record<string, unknown> | null }
+  | { ok: false; reason: "invalid-code" | "expired" | "rate-limited"; retryAfterSeconds?: number };
 
-export async function verifyLogin(raw: string, rawCode: string): Promise<VerifyLoginResult> {
-  const identifier = normalizeIdentifier(raw);
-  if (!identifier) return { ok: false, reason: "invalid-identifier" };
-
+/** Checks a submitted code and, on success, marks it spent. */
+async function consumeCode(
+  identifier: NormalizedIdentifier,
+  rawCode: string,
+  purpose: OtpPurpose,
+): Promise<ConsumeCodeResult> {
   const limit = await consumeRateLimit("otpVerify", identifier.value);
   if (!limit.allowed) {
     return { ok: false, reason: "rate-limited", retryAfterSeconds: limit.retryAfterSeconds };
@@ -153,7 +169,7 @@ export async function verifyLogin(raw: string, rawCode: string): Promise<VerifyL
 
   const code = rawCode.replace(/\D/g, "");
   const challenge = await prisma.otpChallenge.findFirst({
-    where: { identifier: identifier.value, consumedAt: null },
+    where: { identifier: identifier.value, purpose, consumedAt: null },
     orderBy: { createdAt: "desc" },
   });
 
@@ -175,47 +191,360 @@ export async function verifyLogin(raw: string, rawCode: string): Promise<VerifyL
 
   await prisma.otpChallenge.update({
     where: { id: challenge.id },
-    data: { consumedAt: new Date() },
+    // The payload is cleared with the same write: a spent signup challenge has
+    // no reason to keep holding a password hash.
+    data: { consumedAt: new Date(), payload: undefined },
   });
 
-  const where =
-    identifier.channel === "email"
-      ? { email: identifier.value }
-      : { phone: identifier.value };
-  const existing = await prisma.user.findUnique({ where });
+  return {
+    ok: true,
+    payload: (challenge.payload as Record<string, unknown> | null) ?? null,
+  };
+}
 
-  if (existing) {
-    if (existing.status === "BANNED") return { ok: false, reason: "suspended" };
-    if (
-      existing.status === "SUSPENDED" &&
-      (!existing.suspendedUntil || existing.suspendedUntil.getTime() > Date.now())
-    ) {
-      return { ok: false, reason: "suspended" };
-    }
+/** Shared gate: a banned or currently-suspended account cannot open a session. */
+function accountBlocked(user: Pick<User, "status" | "suspendedUntil">): boolean {
+  if (user.status === "BANNED") return true;
+  return (
+    user.status === "SUSPENDED" &&
+    (!user.suspendedUntil || user.suspendedUntil.getTime() > Date.now())
+  );
+}
 
-    const user = await prisma.user.update({
-      where: { id: existing.id },
-      data: {
-        lastSeenAt: new Date(),
-        verifiedAt: existing.verifiedAt ?? new Date(),
-        // A lapsed suspension clears itself on next sign-in.
-        ...(existing.status === "SUSPENDED" ? { status: "ACTIVE" as const, suspendedUntil: null } : {}),
-      },
-    });
-    await createSession(user.id);
-    return { ok: true, user, isNewUser: false };
+/** Records the sign-in and lets a lapsed suspension clear itself. */
+async function markSignedIn(user: User): Promise<User> {
+  return prisma.user.update({
+    where: { id: user.id },
+    data: {
+      lastSeenAt: new Date(),
+      verifiedAt: user.verifiedAt ?? new Date(),
+      ...(user.status === "SUSPENDED"
+        ? { status: "ACTIVE" as const, suspendedUntil: null }
+        : {}),
+    },
+  });
+}
+
+// ------------------------------------------------------------- sign-up -----
+
+export interface SignupDraft {
+  identifier: string;
+  displayName: string;
+  password: string;
+}
+
+export type StartSignupResult =
+  | { ok: true; identifier: string; channel: OtpChannel; developmentDriver: boolean }
+  | {
+      ok: false;
+      reason: "invalid-identifier" | "taken" | "rate-limited" | "delivery-failed";
+      retryAfterSeconds?: number;
+    };
+
+/**
+ * Step one of creating an account. The name and the (already hashed) password
+ * ride along on the challenge rather than on a half-built `users` row: until
+ * the address answers, it has not earned the unique key, and nobody can park on
+ * someone else's address by starting a sign-up they never finish.
+ */
+export async function startSignup(draft: SignupDraft): Promise<StartSignupResult> {
+  const identifier = normalizeIdentifier(draft.identifier);
+  if (!identifier) return { ok: false, reason: "invalid-identifier" };
+
+  const existing = await prisma.user.findUnique({ where: identifierWhere(identifier) });
+  if (existing) return { ok: false, reason: "taken" };
+
+  const passwordHash = await hashPassword(draft.password);
+  const result = await sendCode(identifier, "SIGNUP", {
+    displayName: draft.displayName,
+    passwordHash,
+  });
+
+  return result.ok
+    ? result
+    : { ok: false, reason: result.reason, retryAfterSeconds: result.retryAfterSeconds };
+}
+
+export type CompleteSignupResult =
+  | { ok: true; user: User }
+  | {
+      ok: false;
+      reason: "invalid-identifier" | "invalid-code" | "expired" | "rate-limited" | "taken";
+      retryAfterSeconds?: number;
+    };
+
+/** Step two: the address answered, so the account becomes real. */
+export async function completeSignup(
+  raw: string,
+  rawCode: string,
+): Promise<CompleteSignupResult> {
+  const identifier = normalizeIdentifier(raw);
+  if (!identifier) return { ok: false, reason: "invalid-identifier" };
+
+  const consumed = await consumeCode(identifier, rawCode, "SIGNUP");
+  if (!consumed.ok) {
+    return { ok: false, reason: consumed.reason, retryAfterSeconds: consumed.retryAfterSeconds };
   }
+
+  const displayName = typeof consumed.payload?.displayName === "string"
+    ? consumed.payload.displayName
+    : null;
+  const passwordHash = typeof consumed.payload?.passwordHash === "string"
+    ? consumed.payload.passwordHash
+    : null;
+
+  // A challenge without its payload cannot produce an account. Sending the
+  // person back to the first screen is the only honest outcome.
+  if (!displayName || !passwordHash) return { ok: false, reason: "expired" };
+
+  // Someone else may have registered the address in the ten minutes the code
+  // was valid for.
+  const taken = await prisma.user.findUnique({ where: identifierWhere(identifier) });
+  if (taken) return { ok: false, reason: "taken" };
 
   const user = await prisma.user.create({
     data: {
-      ...where,
-      // Placeholder until the user picks a name on the next screen.
-      displayName: "مستخدم جديد",
+      ...identifierWhere(identifier),
+      displayName,
+      passwordHash,
       verifiedAt: new Date(),
     },
   });
+
   await createSession(user.id);
-  return { ok: true, user, isNewUser: true };
+  return { ok: true, user };
+}
+
+// ------------------------------------------------------ password sign-in ---
+
+export type PasswordLoginResult =
+  | { ok: true; user: User }
+  | {
+      ok: false;
+      reason: "invalid-identifier" | "invalid-credentials" | "no-password" | "suspended" | "rate-limited";
+      retryAfterSeconds?: number;
+    };
+
+export async function loginWithPassword(
+  raw: string,
+  password: string,
+): Promise<PasswordLoginResult> {
+  const identifier = normalizeIdentifier(raw);
+  if (!identifier) return { ok: false, reason: "invalid-identifier" };
+
+  const limit = await consumeRateLimit("passwordLogin", identifier.value);
+  if (!limit.allowed) {
+    return { ok: false, reason: "rate-limited", retryAfterSeconds: limit.retryAfterSeconds };
+  }
+
+  const ip = await requestIp();
+  if (ip) {
+    const perIp = await consumeRateLimit("passwordLoginPerIp", hashIp(ip)!);
+    if (!perIp.allowed) {
+      return { ok: false, reason: "rate-limited", retryAfterSeconds: perIp.retryAfterSeconds };
+    }
+  }
+
+  const user = await prisma.user.findUnique({ where: identifierWhere(identifier) });
+
+  // An unknown address and a wrong password give the same answer: anything else
+  // turns this form into a way to find out who has an account here.
+  if (!user) return { ok: false, reason: "invalid-credentials" };
+
+  // Accounts that predate passwords, and accounts created by staff. They sign
+  // in with a code and can set a password from the "forgot" screen.
+  if (!user.passwordHash) return { ok: false, reason: "no-password" };
+
+  if (!(await verifyPassword(password, user.passwordHash))) {
+    return { ok: false, reason: "invalid-credentials" };
+  }
+
+  if (accountBlocked(user)) return { ok: false, reason: "suspended" };
+
+  // Upgrade the digest transparently when the cost parameters have moved on.
+  if (needsRehash(user.passwordHash)) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await hashPassword(password) },
+    });
+  }
+
+  const signedIn = await markSignedIn(user);
+  await createSession(signedIn.id);
+  return { ok: true, user: signedIn };
+}
+
+// ------------------------------------------------------- code sign-in ------
+
+export type StartLoginResult =
+  | { ok: true; identifier: string; channel: OtpChannel; developmentDriver: boolean }
+  | {
+      ok: false;
+      reason: "invalid-identifier" | "rate-limited" | "delivery-failed";
+      retryAfterSeconds?: number;
+    };
+
+/** The code path, kept for accounts with no password set. */
+export async function startLogin(raw: string): Promise<StartLoginResult> {
+  const identifier = normalizeIdentifier(raw);
+  if (!identifier) return { ok: false, reason: "invalid-identifier" };
+
+  const result = await sendCode(identifier, "LOGIN");
+  return result.ok
+    ? result
+    : { ok: false, reason: result.reason, retryAfterSeconds: result.retryAfterSeconds };
+}
+
+export type VerifyLoginResult =
+  | { ok: true; user: User }
+  | {
+      ok: false;
+      reason:
+        | "invalid-identifier"
+        | "invalid-code"
+        | "expired"
+        | "rate-limited"
+        | "suspended"
+        | "no-account";
+      retryAfterSeconds?: number;
+    };
+
+export async function verifyLogin(raw: string, rawCode: string): Promise<VerifyLoginResult> {
+  const identifier = normalizeIdentifier(raw);
+  if (!identifier) return { ok: false, reason: "invalid-identifier" };
+
+  const consumed = await consumeCode(identifier, rawCode, "LOGIN");
+  if (!consumed.ok) {
+    return { ok: false, reason: consumed.reason, retryAfterSeconds: consumed.retryAfterSeconds };
+  }
+
+  const existing = await prisma.user.findUnique({ where: identifierWhere(identifier) });
+  // Signing in no longer creates accounts. An account is made once, on the
+  // sign-up screen, where a name and a password are actually collected.
+  if (!existing) return { ok: false, reason: "no-account" };
+  if (accountBlocked(existing)) return { ok: false, reason: "suspended" };
+
+  const user = await markSignedIn(existing);
+  await createSession(user.id);
+  return { ok: true, user };
+}
+
+// ---------------------------------------------------- password reset -------
+
+export type StartPasswordResetResult =
+  | { ok: true; identifier: string; developmentDriver: boolean; delivered: boolean }
+  | {
+      ok: false;
+      reason: "invalid-identifier" | "rate-limited" | "delivery-failed";
+      retryAfterSeconds?: number;
+    };
+
+/**
+ * Sends a reset code — but only to an address that has an account.
+ *
+ * For an unknown address it reports success without sending anything: the
+ * screen must not answer the question "does this person have an account here?".
+ */
+export async function startPasswordReset(raw: string): Promise<StartPasswordResetResult> {
+  const identifier = normalizeIdentifier(raw);
+  if (!identifier) return { ok: false, reason: "invalid-identifier" };
+
+  const user = await prisma.user.findUnique({ where: identifierWhere(identifier) });
+  if (!user || user.status === "BANNED") {
+    return { ok: true, identifier: identifier.value, developmentDriver: false, delivered: false };
+  }
+
+  const result = await sendCode(identifier, "PASSWORD_RESET");
+  if (!result.ok) {
+    return { ok: false, reason: result.reason, retryAfterSeconds: result.retryAfterSeconds };
+  }
+
+  return {
+    ok: true,
+    identifier: result.identifier,
+    developmentDriver: result.developmentDriver,
+    delivered: true,
+  };
+}
+
+export type CompletePasswordResetResult =
+  | { ok: true; user: User }
+  | {
+      ok: false;
+      reason:
+        | "invalid-identifier"
+        | "invalid-code"
+        | "expired"
+        | "rate-limited"
+        | "suspended"
+        | "no-account";
+      retryAfterSeconds?: number;
+    };
+
+/**
+ * Sets a new password and signs the person in.
+ *
+ * Every other session is destroyed first: whoever knew the old password — which
+ * is the usual reason for resetting one — loses their access at the same
+ * moment.
+ */
+export async function completePasswordReset(
+  raw: string,
+  rawCode: string,
+  password: string,
+): Promise<CompletePasswordResetResult> {
+  const identifier = normalizeIdentifier(raw);
+  if (!identifier) return { ok: false, reason: "invalid-identifier" };
+
+  const consumed = await consumeCode(identifier, rawCode, "PASSWORD_RESET");
+  if (!consumed.ok) {
+    return { ok: false, reason: consumed.reason, retryAfterSeconds: consumed.retryAfterSeconds };
+  }
+
+  const existing = await prisma.user.findUnique({ where: identifierWhere(identifier) });
+  if (!existing) return { ok: false, reason: "no-account" };
+  if (accountBlocked(existing)) return { ok: false, reason: "suspended" };
+
+  const passwordHash = await hashPassword(password);
+  await prisma.session.deleteMany({ where: { userId: existing.id } });
+
+  const user = await prisma.user.update({
+    where: { id: existing.id },
+    data: {
+      passwordHash,
+      lastSeenAt: new Date(),
+      verifiedAt: existing.verifiedAt ?? new Date(),
+      ...(existing.status === "SUSPENDED"
+        ? { status: "ACTIVE" as const, suspendedUntil: null }
+        : {}),
+    },
+  });
+
+  await createSession(user.id);
+  return { ok: true, user };
+}
+
+/** Changing a password from inside the account, where the old one is known. */
+export async function changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<{ ok: true } | { ok: false; reason: "invalid-credentials" }> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) return { ok: false, reason: "invalid-credentials" };
+
+  // An account with no password yet (a code-only account) can set one without
+  // proving the old one — there is none to prove.
+  if (user.passwordHash && !(await verifyPassword(currentPassword, user.passwordHash))) {
+    return { ok: false, reason: "invalid-credentials" };
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { passwordHash: await hashPassword(newPassword) },
+  });
+
+  return { ok: true };
 }
 
 // ----------------------------------------------------------- sessions -----

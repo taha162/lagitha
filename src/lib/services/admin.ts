@@ -19,6 +19,7 @@ export interface DashboardMetrics {
   needsReview: number;
   openFlags: number;
   pendingVerifications: number;
+  pendingIdentities: number;
   newReports7d: number;
 }
 
@@ -31,6 +32,7 @@ export async function dashboardMetrics(): Promise<DashboardMetrics> {
     needsReview,
     openFlags,
     pendingVerifications,
+    pendingIdentities,
     newReports7d,
   ] = await Promise.all([
     prisma.report.count({ where: { type: "LOST", status: "ACTIVE", moderation: "VISIBLE" } }),
@@ -40,6 +42,7 @@ export async function dashboardMetrics(): Promise<DashboardMetrics> {
     prisma.report.count({ where: { moderation: "UNDER_REVIEW" } }),
     prisma.flag.count({ where: { status: "OPEN" } }),
     prisma.verificationRequest.count({ where: { status: "PENDING" } }),
+    prisma.identityVerification.count({ where: { status: "PENDING" } }),
     prisma.report.count({ where: { createdAt: { gte: daysAgo(7) } } }),
   ]);
 
@@ -51,6 +54,7 @@ export async function dashboardMetrics(): Promise<DashboardMetrics> {
     needsReview,
     openFlags,
     pendingVerifications,
+    pendingIdentities,
     newReports7d,
   };
 }

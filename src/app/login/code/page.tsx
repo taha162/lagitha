@@ -3,14 +3,14 @@ import { redirect } from "next/navigation";
 import { ar } from "@/i18n/ar";
 import { authChannel, getCurrentUser } from "@/lib/auth";
 import { AuthShell } from "@/components/auth-shell";
-import { SignInForm } from "./sign-in-form";
+import { LoginForm } from "../login-form";
 
 export const metadata: Metadata = {
-  title: ar.auth.title,
+  title: ar.auth.codeLoginTitle,
   robots: { index: false, follow: false },
 };
 
-export default async function LoginPage({
+export default async function CodeLoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ next?: string }>;
@@ -21,14 +21,8 @@ export default async function LoginPage({
   if (await getCurrentUser()) redirect(target);
 
   return (
-    <AuthShell
-      footer={
-        <p className="mt-8 text-fine text-muted text-center leading-relaxed">
-          {ar.auth.requiredHint}
-        </p>
-      }
-    >
-      <SignInForm next={target} channel={authChannel()} />
+    <AuthShell>
+      <LoginForm next={target} channel={authChannel()} />
     </AuthShell>
   );
 }

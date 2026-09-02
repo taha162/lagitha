@@ -85,6 +85,12 @@ export default async function AdminDashboard() {
           value={metrics.pendingVerifications}
           href="/admin/verifications"
         />
+        <Metric
+          label={ar.admin.dashboard.pendingIdentities}
+          value={metrics.pendingIdentities}
+          tone={metrics.pendingIdentities > 0 ? "warning" : "neutral"}
+          href="/admin/identity"
+        />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

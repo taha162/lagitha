@@ -13,6 +13,7 @@ src/generated/
 # Local object storage (LocalStorageProvider dev driver)
 public/uploads/
 storage/
+storage-test/
 
 *.log
 npm-debug.log*

@@ -29,7 +29,7 @@ startup if it is missing or wrong. Before going live you must set:
 |---|---|
 | `DATABASE_URL` | |
 | `SESSION_SECRET` | 32+ random chars — `openssl rand -base64 48`. Startup refuses a dev placeholder or anything shorter. |
-| `OTP_PROVIDER` | **not** `console` — startup refuses it in production, because that driver prints login codes to the log |
+| `OTP_PROVIDER` | **not** `console` — startup refuses it in production, because that driver prints login codes to the log. Required for sign-up and password reset even though sign-in is a password. |
 | `STORAGE_DRIVER` | `s3` for anything with more than one app node |
 | `NEXT_PUBLIC_SITE_URL` | used for canonical URLs, Open Graph and the sitemap |
 
@@ -38,11 +38,13 @@ startup if it is missing or wrong. Before going live you must set:
 Set `SITE_NOINDEX=1` on staging. It switches `robots.txt` to disallow
 everything and empties the sitemap.
 
-### Sending the login code
+### Sending the one-time code
 
-Nobody can sign in until a delivery driver is configured. `OTP_PROVIDER`
-selects it, and the driver decides whether the sign-in screen asks for an
-email address or a phone number:
+Signing in is a password, so a delivery driver is no longer needed for
+day-to-day access — but **nobody can create an account without one**, and
+nobody can reset a forgotten password. `OTP_PROVIDER` selects the driver, and
+the driver decides whether the screens ask for an email address or a phone
+number:
 
 | value | channel | use |
 |---|---|---|
@@ -157,6 +159,35 @@ waiting on a person:
 Empty queue is the normal state and the dashboard says so rather than showing
 a chart.
 
+### Identity cards
+
+`/admin/identity` is the queue that gates publishing. Oldest first — someone
+waiting longest is served first.
+
+Each row shows the name on the account, the name written on the card, and a
+masked address. The images are **not** shown in the table: opening one is a
+deliberate click that writes an `AdminAction` naming you, before the image is
+read. Treat it that way — it is somebody's identity document.
+
+What to check: that the card is a real البطاقة الموحدة, that both sides belong
+to the same card, and that the name on it is plausibly the name on the account.
+Nothing else. The card *number* is not collected and must not be recorded
+anywhere, including in a decision note.
+
+- **توثيق** approves. The images are deleted from storage by the same write
+  that records the decision.
+- **رفض** requires a written reason, which is sent to the person so they can
+  fix it and resubmit. Rejecting also pulls that account's live reports into
+  `UNDER_REVIEW` — an identity we do not believe should not keep publishing
+  behind us. Review those reports separately.
+
+A queued card lets its owner publish while it waits. That is deliberate: a
+wallet lost at midnight has to be reportable at midnight, and the deterrent is
+having handed over a real identity, not the review having finished. It does
+mean the queue is the thing to keep short — a backlog is a window in which a
+false identity is publishing. Watch the "بطاقات هوية تنتظر المراجعة" figure on
+the dashboard.
+
 ### Reports
 
 `/admin/reports` — filter by type, moderation state and status, or paste a
@@ -238,6 +269,11 @@ Neighbourhoods live in `prisma/seed.ts`. Adding one and re-running
 - Orphaned uploads: an image uploaded in an abandoned wizard stays parked
   against the `__pending__` sentinel. Deleting `ReportImage` rows with that
   `reportId` older than a day, along with their storage objects, is safe.
+- `purgeDecidedIdentityImages()` (`src/lib/services/identity.ts`) deletes card
+  images belonging to a verification that has already been decided. There
+  should never be any: the decision write deletes them. It exists for the case
+  where object storage was unavailable at that moment, or a row came back from
+  a backup taken before the purge. Cheap, idempotent, worth a daily cron.
 
 ## Backups
 
@@ -251,6 +287,14 @@ Recovery records are the project's evidence that it works — keep them longest.
 
 ## Data protection
 
+- **Identity card images** are the most sensitive thing the platform holds, and
+  the design is built around not holding them. They live under an `identity/`
+  storage prefix that `/api/media` refuses outright; the only reader is the
+  staff route, which checks a role and writes an audit entry per view; and they
+  are deleted in the same database write that records a decision. If you ever
+  find a decided verification still holding a key, that is a bug — run
+  `purgeDecidedIdentityImages()` and say so. The card number is never
+  collected, so there is none to protect.
 - Phone numbers are never exposed to another user by any code path, and staff
   see them masked. `maskPhone` exists so that any future contact surface has to
   go out of its way to leak one.
