@@ -33,6 +33,33 @@ function optional(name: string, fallback: string): string {
   return value && value.length > 0 ? value : fallback;
 }
 
+/**
+ * Reads a variable holding a JSON object, e.g. SMS gateway headers.
+ * Malformed JSON is a configuration mistake worth failing on, not ignoring.
+ */
+function parseJsonRecord(name: string): Record<string, string> {
+  const raw = process.env[name];
+  if (!raw || raw.trim().length === 0) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("not a JSON object");
+    }
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [
+        key,
+        String(value),
+      ]),
+    );
+  } catch (error) {
+    throw new Error(
+      `${name} must be a JSON object, e.g. {"Authorization":"Bearer xxx"}. ${
+        error instanceof Error ? error.message : ""
+      }`,
+    );
+  }
+}
+
 function integer(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -70,9 +97,25 @@ export const env = {
     "dev-only-change-me-dev-only-change-me-dev-only-1234",
   ),
 
+  /** twilio | http | console | disabled — see src/lib/providers/otp.ts */
   otpProvider: optional("OTP_PROVIDER", isProduction ? "disabled" : "console"),
   /** Development shortcut so demo accounts can sign in without an SMS gateway. */
   otpFixedCode: isProduction ? undefined : process.env.OTP_DEV_FIXED_CODE,
+
+  twilio: {
+    accountSid: process.env.TWILIO_ACCOUNT_SID,
+    authToken: process.env.TWILIO_AUTH_TOKEN,
+    from: process.env.TWILIO_FROM,
+    messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID,
+  },
+
+  /** Generic HTTP gateway, for local Iraqi SMS aggregators. */
+  smsHttp: {
+    url: process.env.SMS_HTTP_URL,
+    method: optional("SMS_HTTP_METHOD", "POST"),
+    bodyTemplate: process.env.SMS_HTTP_BODY,
+    headers: parseJsonRecord("SMS_HTTP_HEADERS"),
+  },
 
   storageDriver: optional("STORAGE_DRIVER", "local"),
   storageLocalDir: optional("STORAGE_LOCAL_DIR", "./storage"),

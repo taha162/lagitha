@@ -38,26 +38,61 @@ startup if it is missing or wrong. Before going live you must set:
 Set `SITE_NOINDEX=1` on staging. It switches `robots.txt` to disallow
 everything and empties the sitemap.
 
-### Before launch: an SMS driver
+### Sending the login code (SMS)
 
-The product ships with no SMS gateway. `OTP_PROVIDER=console` prints the code
-to the server log, which is fine for development and unacceptable in
-production — hence the startup check.
+Nobody can sign in until an SMS driver is configured. `OTP_PROVIDER` selects it:
 
-To add one, implement `OtpDeliveryProvider` in `src/lib/providers/otp.ts`:
+| value | use |
+|---|---|
+| `twilio` | real SMS, works internationally including Iraq |
+| `http` | any gateway with a plain HTTP API — most local Iraqi aggregators |
+| `console` | prints the code to the server log; **development only**, refused at startup in production |
+| `disabled` | login is refused with a clear message (the default) |
 
-```ts
-class MySmsProvider implements OtpDeliveryProvider {
-  readonly name = "my-sms";
-  readonly isDevelopmentDriver = false;
+**Twilio**
 
-  async send(phone: string, code: string): Promise<boolean> {
-    // return false on failure; never throw
-  }
-}
+```
+OTP_PROVIDER=twilio
+TWILIO_ACCOUNT_SID=ACxxxxxxxx
+TWILIO_AUTH_TOKEN=xxxxxxxx
+TWILIO_MESSAGING_SERVICE_SID=MGxxxxxxxx   # or TWILIO_FROM=+15551234567
 ```
 
-and add one branch to `otp()`. Nothing else changes.
+Two things to know before relying on it for Mosul:
+
+- A trial account only delivers to numbers you have verified in the Twilio
+  console. Upgrade before real users try to sign in.
+- International A2P traffic into Iraq is filtered by the local carriers more
+  than most markets, and per-message cost is comparatively high. Test with a
+  real Zain / Asiacell / Korek number before launch — do not assume it works.
+
+**A local Iraqi gateway** (usually cheaper and more reliable for Iraqi numbers)
+
+Most resellers expose one endpoint. No code needed — describe it in
+environment variables. `{phone}`, `{message}` and `{code}` are substituted:
+
+```
+OTP_PROVIDER=http
+SMS_HTTP_URL=https://gateway.example.iq/api/send
+SMS_HTTP_METHOD=POST
+SMS_HTTP_BODY={"to":"{phone}","text":"{message}","sender":"LAGAITHA"}
+SMS_HTTP_HEADERS={"Authorization":"Bearer xxxxxxxx"}
+```
+
+For a GET-style gateway, put the placeholders in the URL and set
+`SMS_HTTP_METHOD=GET`; the phone number is percent-encoded automatically.
+
+Most Iraqi gateways require a registered **sender ID** (alphanumeric, e.g.
+`LAGAITHA`) before they will deliver. Arrange that with the vendor first — it
+usually takes a few days.
+
+**Anything more unusual** — implement `OtpDeliveryProvider` in
+`src/lib/providers/otp.ts` and add one branch to `otp()`. A driver must return
+`false` on failure rather than throwing; login shows the user a human message
+instead of a stack trace.
+
+Check the result at `/api/health`: the `OTP_PROVIDER` row reports whether the
+selected driver has everything it needs.
 
 ### Map tiles
 

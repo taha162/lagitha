@@ -42,13 +42,7 @@ export async function GET() {
 
   // `??` would let an empty string through; a blank value is a missing value.
   const otpProvider = nonEmpty(process.env.OTP_PROVIDER) ?? "disabled";
-  checks.OTP_PROVIDER =
-    otpProvider === "console"
-      ? { ok: false, detail: "'console' prints login codes to the log; refused in production" }
-      : {
-          ok: true,
-          detail: process.env.OTP_PROVIDER === "" ? "defined but empty → 'disabled'" : otpProvider,
-        };
+  checks.OTP_PROVIDER = describeOtpProvider(otpProvider);
 
   checks.OTP_DEV_FIXED_CODE = nonEmpty(process.env.OTP_DEV_FIXED_CODE)
     ? { ok: false, detail: "set — must be removed in production" }
@@ -139,6 +133,54 @@ export async function GET() {
       headers: { "Cache-Control": "no-store" },
     },
   );
+}
+
+/**
+ * SMS delivery: reports whether the chosen driver has everything it needs.
+ * `disabled` is flagged because it means nobody can sign in.
+ */
+function describeOtpProvider(provider: string): Check {
+  switch (provider) {
+    case "twilio": {
+      const missing = [
+        !nonEmpty(process.env.TWILIO_ACCOUNT_SID) && "TWILIO_ACCOUNT_SID",
+        !nonEmpty(process.env.TWILIO_AUTH_TOKEN) && "TWILIO_AUTH_TOKEN",
+        !nonEmpty(process.env.TWILIO_MESSAGING_SERVICE_SID) &&
+          !nonEmpty(process.env.TWILIO_FROM) &&
+          "TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM",
+      ].filter((value): value is string => Boolean(value));
+
+      return missing.length === 0
+        ? { ok: true, detail: "twilio — configured" }
+        : { ok: false, detail: `twilio selected but missing: ${missing.join(", ")}` };
+    }
+
+    case "http":
+      return nonEmpty(process.env.SMS_HTTP_URL)
+        ? { ok: true, detail: `http gateway — ${describeHost(process.env.SMS_HTTP_URL!)}` }
+        : { ok: false, detail: "http selected but SMS_HTTP_URL is not set" };
+
+    case "console":
+      return {
+        ok: false,
+        detail: "'console' prints login codes to the log; refused in production",
+      };
+
+    default:
+      return {
+        ok: false,
+        detail:
+          "no SMS driver — nobody can sign in. Set OTP_PROVIDER to 'twilio' or 'http'.",
+      };
+  }
+}
+
+function describeHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "unparseable SMS_HTTP_URL";
+  }
 }
 
 /** Treats a blank value as absent, which is what a dashboard-defined empty is. */
