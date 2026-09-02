@@ -10,6 +10,7 @@ import {
   type MatchReason,
 } from "../matching";
 import { safeJson } from "../utils";
+import { PUBLIC_AUTHOR_SELECT } from "../privacy";
 import { notifyOnce } from "./notifications";
 
 /**
@@ -273,7 +274,7 @@ export async function matchesForReport(reportId: string) {
           category: true,
           area: true,
           images: { orderBy: { position: "asc" }, take: 1 },
-          user: { select: { id: true, displayName: true, createdAt: true } },
+          user: { select: PUBLIC_AUTHOR_SELECT },
         },
       },
       reportB: {
@@ -281,7 +282,7 @@ export async function matchesForReport(reportId: string) {
           category: true,
           area: true,
           images: { orderBy: { position: "asc" }, take: 1 },
-          user: { select: { id: true, displayName: true, createdAt: true } },
+          user: { select: PUBLIC_AUTHOR_SELECT },
         },
       },
     },

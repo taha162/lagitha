@@ -5,6 +5,7 @@ import {
   Clock,
   MapPin,
   ShieldAlert,
+  BadgeCheck,
   ShieldCheck,
   Tag,
   Eye,
@@ -33,6 +34,7 @@ import { formatOccurredAt, relativeTime } from "@/lib/time";
 import { colorName, colorSwatch } from "@/lib/attributes";
 import { AppShell } from "@/components/app-shell";
 import { Badge, ReportStatusBadge, ReportTypeBadge } from "@/components/ui/badge";
+import { Avatar } from "@/components/ui/avatar";
 import { CategoryIcon } from "@/components/category-icon";
 import { AreaMap } from "@/components/map/area-map";
 import { ReportGallery } from "./gallery";
@@ -243,9 +245,20 @@ export default async function ReportPage({
             <div className="flex items-center justify-between gap-3 text-meta">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-muted shrink-0">{ar.report.reportedBy}</span>
+                <Avatar
+                  url={report.author.avatarUrl}
+                  name={report.author.displayName}
+                  size="sm"
+                />
                 <span className="text-text font-medium truncate">
                   {report.author.displayName}
                 </span>
+                {report.author.verified && (
+                  <Badge tone="success" className="shrink-0">
+                    <BadgeCheck className="size-3" aria-hidden />
+                    {ar.identity.badge}
+                  </Badge>
+                )}
                 {report.author.trusted && (
                   <Badge tone="success" className="shrink-0">
                     <ShieldCheck className="size-3" aria-hidden />

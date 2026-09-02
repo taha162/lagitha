@@ -29,12 +29,16 @@ mistaken for a real report. Reference data (categories, neighbourhoods) is
 seeded without the flag and is safe to run in production.
 
 Sign in with any seeded address — `admin@lagaitha.local` is an admin,
-`abu.ahmed@lagaitha.local` and the others are ordinary members — and the code
-from `OTP_DEV_FIXED_CODE` (`000000`). Without that variable the code is
-printed to the server log by the `console` driver.
+`abu.ahmed@lagaitha.local` and the others are ordinary members — and the
+password `lagaitha-demo-2026`. Every demo account is created already verified,
+so it can publish.
+
+To exercise the sign-up flow instead, `/signup` sends a six-digit code to the
+address given. With `OTP_DEV_FIXED_CODE=000000` that code is always `000000`;
+without it the `console` driver prints the real one to the server log.
 
 ```bash
-npm test          # 219 unit + integration tests (needs TEST_DATABASE_URL)
+npm test          # 261 unit + integration tests (needs TEST_DATABASE_URL)
 npm run typecheck
 npm run build
 ```
@@ -45,8 +49,12 @@ npm run build
 
 **For people**
 
+- Create an account once: name, email, password, and optionally a photo and a
+  neighbourhood. After that, signing in is the password; a one-time code is
+  there for a forgotten one.
 - Report something lost or found — a six-step flow, one question per screen,
-  where only *what it is* and *roughly where* are required.
+  where only *what it is* and *roughly where* are required. Publishing needs a
+  verified identity first (below).
 - Search in the Arabic people actually type: `ايفون اسود`, `محفظه`, `موبايل`.
 - Approximate locations only. The precise pin is stored, never published.
 - Potential matches with the reasons behind each score, always worded as
@@ -56,8 +64,9 @@ npm run build
 - Two-sided recovery confirmation.
 
 **For staff** — a separate desktop-first console at `/admin`: dashboard,
-report queue with a review drawer, matches, verification oversight, duplicate
-candidates, flags, users, a clustered map, analytics, and an audit log.
+report queue with a review drawer, matches, ownership-verification oversight,
+the identity-card queue, duplicate candidates, flags, users, a clustered map,
+analytics, and an audit log.
 
 ---
 
@@ -82,13 +91,14 @@ dependency.
 ### Deliberately not included
 
 Push notifications, native apps, facial recognition, blockchain, live video,
-government or police integrations, and automatic identity verification — all
+government or police integrations, and *automatic* identity verification — all
 either unavailable in this context, or unnecessary for the product to work.
-See `docs/ARCHITECTURE.md` for the reasoning on each.
+Identity cards are read by a person, not by a model. See
+`docs/ARCHITECTURE.md` for the reasoning on each.
 
 ---
 
-## The four rules the code enforces
+## The five rules the code enforces
 
 1. **Precise coordinates never leave the server.** They are written by
    `createReport`, read by the matcher and by staff tooling, and coarsened to a
@@ -97,16 +107,22 @@ See `docs/ARCHITECTURE.md` for the reasoning on each.
 2. **Sensitive reports publish a generic label.** A lost national ID appears as
    *وثيقة شخصية* with no description and no images — shareable by link, and
    excluded from the search index.
-3. **A finder must commit before they see a claim.** The claimant answers a
+3. **An identity card is deleted the moment it is judged.** Both sides of the
+   national ID are required before a person can publish, and they are stored
+   under a prefix that the public media route refuses, readable only through a
+   staff route that logs every single view. The decision write is the same
+   write that clears the keys and deletes the objects — an approved account
+   keeps a date, never the document. The card number is never asked for.
+4. **A finder must commit before they see a claim.** The claimant answers a
    question about a detail that was never published; the finder only sees that
    answer *after* recording what they expect it to be, and the finder's secret
    is snapshotted onto the claim so a later edit cannot move the goalposts.
-4. **Recovery needs both sides.** One person cannot close a case the other
+5. **Recovery needs both sides.** One person cannot close a case the other
    never agreed to — which is what makes the recovery statistics mean anything.
 
 Each of these has tests in `tests/unit/privacy.test.ts`,
-`tests/integration/verification.test.ts` and
-`tests/integration/recovery.test.ts`.
+`tests/integration/identity.test.ts`, `tests/integration/verification.test.ts`
+and `tests/integration/recovery.test.ts`.
 
 ---
 

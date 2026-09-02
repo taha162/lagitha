@@ -31,6 +31,12 @@ export const RATE_LIMITS = {
   otpRequestPerIp: { limit: 20, windowSeconds: 60 * 60 },
   /** Code submissions per phone number. */
   otpVerify: { limit: 10, windowSeconds: 15 * 60 },
+  /** Password attempts per account — what makes a weak password survivable. */
+  passwordLogin: { limit: 10, windowSeconds: 15 * 60 },
+  /** Password attempts per IP, to stop spraying one password across accounts. */
+  passwordLoginPerIp: { limit: 50, windowSeconds: 15 * 60 },
+  /** National ID submissions per user per day. */
+  identitySubmit: { limit: 5, windowSeconds: 24 * 60 * 60 },
   /** Reports created per user per day. */
   reportCreate: { limit: 10, windowSeconds: 24 * 60 * 60 },
   /** Image uploads per user per hour. */

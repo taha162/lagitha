@@ -29,10 +29,28 @@ export function assertSafeKey(key: string): void {
 }
 
 /**
+ * Objects under this prefix are national identity cards. Nothing here is ever
+ * served by `/api/media`, and `mediaUrl` refuses to produce a URL for one — the
+ * only way to read one is the staff route, which checks a role and writes an
+ * audit entry.
+ *
+ * The prefix is the mechanism: a future call site that forgets the rule gets an
+ * exception rather than a public link.
+ */
+export const PRIVATE_KEY_PREFIX = "identity/";
+
+export function isPrivateKey(key: string): boolean {
+  return key.startsWith(PRIVATE_KEY_PREFIX);
+}
+
+/**
  * Browser-facing URL for a stored object. Pure: derived from configuration
  * alone, so it is safe to call from any server component.
  */
 export function mediaUrl(key: string): string {
+  if (isPrivateKey(key)) {
+    throw new Error("Refusing to build a public URL for a private object");
+  }
   if (env.storageDriver === "s3" && env.s3.publicBaseUrl) {
     return `${env.s3.publicBaseUrl.replace(/\/$/, "")}/${key}`;
   }

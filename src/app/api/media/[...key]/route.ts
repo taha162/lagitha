@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { storage } from "@/lib/providers/storage";
+import { isPrivateKey, storage } from "@/lib/providers/storage";
 
 /**
  * Serves uploaded media.
@@ -8,6 +8,10 @@ import { storage } from "@/lib/providers/storage";
  * an image attached to a public report is public. What it does do is refuse to
  * serve anything that is not an image and pin the content type, so a file that
  * somehow got past upload validation still cannot execute in a browser.
+ *
+ * Because it is unauthenticated by design, it also refuses the private prefix
+ * outright. Identity documents live under that prefix and are readable only
+ * through the staff route, which checks a role and records the read.
  */
 const ALLOWED_EXTENSIONS: Record<string, string> = {
   webp: "image/webp",
@@ -22,6 +26,9 @@ export async function GET(
 ) {
   const { key: segments } = await context.params;
   const key = segments.join("/");
+
+  // The one thing this handler must never do.
+  if (isPrivateKey(key)) return new NextResponse(null, { status: 404 });
 
   const extension = key.split(".").pop()?.toLowerCase();
   const contentType = extension ? ALLOWED_EXTENSIONS[extension] : undefined;

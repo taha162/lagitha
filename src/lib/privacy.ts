@@ -1,6 +1,7 @@
 import type {
   Area,
   Category,
+  IdentityStatus,
   ModerationState,
   Report,
   ReportImage,
@@ -29,11 +30,36 @@ import { mediaUrl } from "./providers/storage";
  *   - the author is exposed as a display name only — never a phone number (§21)
  */
 
+/**
+ * Everything a public view is allowed to know about the person who filed a
+ * report. Written once and reused by every query that feeds `toPublicReport`,
+ * so no call site can widen it by accident — `email`, `phone`, `homeLat` and
+ * the identity record are not on this list, and a query that does not ask for
+ * them cannot leak them.
+ *
+ * `identity` is selected down to its status: whether a card was approved is
+ * public, everything else about it is not.
+ */
+export const PUBLIC_AUTHOR_SELECT = {
+  id: true,
+  displayName: true,
+  createdAt: true,
+  avatarThumbKey: true,
+  identity: { select: { status: true } },
+} as const;
+
+export type PublicAuthorRecord = Pick<
+  User,
+  "id" | "displayName" | "createdAt" | "avatarThumbKey"
+> & {
+  identity?: { status: IdentityStatus } | null;
+};
+
 export type ReportWithRelations = Report & {
   category: Category;
   area: Area | null;
   images: ReportImage[];
-  user: Pick<User, "id" | "displayName" | "createdAt">;
+  user: PublicAuthorRecord;
 };
 
 export interface PublicImage {
@@ -50,6 +76,13 @@ export interface PublicAuthor {
   memberSince: string;
   /** Subtle, earned signal — not a game score (§23). */
   trusted: boolean;
+  /**
+   * A staff member checked this person's national ID card. A boolean is the
+   * entire public surface of that check: no name from the card, no dates, and
+   * certainly no image.
+   */
+  verified: boolean;
+  avatarUrl: string | null;
 }
 
 export interface PublicReport {
@@ -124,14 +157,7 @@ export function toPublicReport(
     images: sensitive && !isOwn ? [] : report.images.map(toPublicImage),
     sensitive,
     publishedAt: report.publishedAt.toISOString(),
-    author: includeAuthor
-      ? {
-          id: report.user.id,
-          displayName: report.user.displayName,
-          memberSince: report.user.createdAt.toISOString(),
-          trusted: authorRecoveries >= TRUSTED_RECOVERY_THRESHOLD,
-        }
-      : null,
+    author: includeAuthor ? toPublicAuthor(report.user, authorRecoveries) : null,
     isOwn,
   };
 }
@@ -147,6 +173,25 @@ export function toOwnerReport(
     viewCount: report.viewCount,
     isOwn: true,
   };
+}
+
+export function toPublicAuthor(
+  user: PublicAuthorRecord,
+  recoveries = 0,
+): PublicAuthor {
+  return {
+    id: user.id,
+    displayName: user.displayName,
+    memberSince: user.createdAt.toISOString(),
+    trusted: recoveries >= TRUSTED_RECOVERY_THRESHOLD,
+    verified: user.identity?.status === "APPROVED",
+    avatarUrl: avatarUrl(user.avatarThumbKey),
+  };
+}
+
+/** Profile photos are ordinary public media; identity documents never are. */
+export function avatarUrl(key: string | null | undefined): string | null {
+  return key ? mediaUrl(key) : null;
 }
 
 export function toPublicImage(image: ReportImage): PublicImage {

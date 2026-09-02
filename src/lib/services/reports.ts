@@ -9,6 +9,7 @@ import { consumeRateLimit } from "../rate-limit";
 import { generateReference } from "../utils";
 import { startOfDay, daysAgo } from "../time";
 import { TIME_PRECISION_BY_PRESET, type WhenPreset } from "../attributes";
+import { PUBLIC_AUTHOR_SELECT } from "../privacy";
 import type { CreateReportInput, SearchParams } from "../validation";
 
 /**
@@ -28,7 +29,7 @@ export const REPORT_INCLUDE = {
   category: true,
   area: true,
   images: { orderBy: { position: "asc" } },
-  user: { select: { id: true, displayName: true, createdAt: true } },
+  user: { select: PUBLIC_AUTHOR_SELECT },
 } satisfies Prisma.ReportInclude;
 
 export type ReportRecord = Prisma.ReportGetPayload<{ include: typeof REPORT_INCLUDE }>;

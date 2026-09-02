@@ -3,6 +3,7 @@ import { PrismaClient } from "@/generated/prisma/client";
 import { buildSearchText } from "@/lib/arabic";
 import { coarsenPoint, formatAreaLabel } from "@/lib/geo";
 import { generateReference } from "@/lib/utils";
+import { PUBLIC_AUTHOR_SELECT } from "@/lib/privacy";
 
 /**
  * Test database helpers. Uses its own client so a test can inspect state that
@@ -25,7 +26,8 @@ export async function resetDatabase(): Promise<void> {
     TRUNCATE TABLE
       "admin_actions", "flags", "recoveries", "notifications", "messages",
       "conversations", "verification_requests", "matches", "report_images",
-      "reports", "otp_challenges", "sessions", "rate_limits", "users"
+      "reports", "identity_verifications", "otp_challenges", "sessions",
+      "rate_limits", "users"
     RESTART IDENTITY CASCADE
   `);
   await ensureReferenceData();
@@ -147,7 +149,31 @@ export async function createReportFixture(seed: ReportSeed) {
       category: true,
       area: true,
       images: true,
-      user: { select: { id: true, displayName: true, createdAt: true } },
+      user: { select: PUBLIC_AUTHOR_SELECT },
+    },
+  });
+}
+
+/**
+ * Gives a user an identity record. Publishing is gated on one, so a test that
+ * creates a report through the service needs this unless it is testing the gate
+ * itself.
+ */
+export async function verifyIdentity(
+  userId: string,
+  status: "PENDING" | "APPROVED" | "REJECTED" = "APPROVED",
+) {
+  return testDb.identityVerification.upsert({
+    where: { userId },
+    update: { status },
+    create: {
+      userId,
+      status,
+      cardName: "اسم على البطاقة",
+      // An approved or rejected record never keeps its images.
+      ...(status === "PENDING"
+        ? { frontKey: "identity/cards/test-front.webp", backKey: "identity/cards/test-back.webp" }
+        : { reviewedAt: new Date(), purgedAt: new Date() }),
     },
   });
 }

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import type { User } from "@/generated/prisma/client";
 import { getCurrentUser } from "./auth";
 import { prisma } from "./db";
+import { PUBLIC_AUTHOR_SELECT } from "./privacy";
 
 /**
  * Every authorization decision in the product lives here.
@@ -114,7 +115,7 @@ export async function loadViewableReport(reference: string, viewer: User | null)
       category: true,
       area: true,
       images: { orderBy: { position: "asc" } },
-      user: { select: { id: true, displayName: true, createdAt: true } },
+      user: { select: PUBLIC_AUTHOR_SELECT },
     },
   });
 
