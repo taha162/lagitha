@@ -65,21 +65,15 @@ export async function GET() {
         await client.$queryRaw`SELECT 1`;
         checks.database = { ok: true, detail: "reachable" };
 
-        // Has `prisma migrate deploy` ever run against this database?
+        // Is the schema what THIS build's code expects?
+        //
+        // "Does a `reports` table exist?" was the old question, and it is the
+        // wrong one: it passes on a database that is several migrations behind,
+        // which is precisely the state in which every page throws. The columns
+        // below are the ones the current code reads, so a database missing any
+        // of them cannot serve this build.
         try {
-          const rows = await client.$queryRaw<{ count: bigint }[]>`
-            SELECT COUNT(*)::bigint AS count
-            FROM information_schema.tables
-            WHERE table_schema = 'public' AND table_name = 'reports'
-          `;
-          checks.schema =
-            Number(rows[0]?.count ?? 0) > 0
-              ? { ok: true, detail: "migrations applied" }
-              : {
-                  ok: false,
-                  detail:
-                    "NO TABLES — migrations never ran. Expose DATABASE_URL to the Build step and redeploy, or run: npx prisma migrate deploy",
-                };
+          checks.schema = await describeSchema(client);
         } catch (error) {
           checks.schema = { ok: false, detail: describeError(error) };
         }
@@ -231,6 +225,74 @@ function describeOtpProvider(provider: string): Check {
           "no delivery driver — nobody can sign in. Set OTP_PROVIDER to " +
           "'resend' or 'smtp' (email), or 'twilio' / 'http' (SMS).",
       };
+  }
+}
+
+/**
+ * Columns and tables this build's queries depend on. Kept as data rather than
+ * inferred, so the failure names the missing thing instead of surfacing as a
+ * Prisma error three screens deep.
+ */
+const REQUIRED_COLUMNS: readonly (readonly [table: string, column: string])[] = [
+  ["reports", "id"],
+  ["users", "passwordHash"],
+  ["users", "avatarThumbKey"],
+  ["users", "homeAreaId"],
+  ["otp_challenges", "purpose"],
+  ["identity_verifications", "status"],
+];
+
+interface PrismaClientLike {
+  $queryRaw<T>(query: TemplateStringsArray, ...values: unknown[]): Promise<T>;
+}
+
+async function describeSchema(client: PrismaClientLike): Promise<Check> {
+  const rows = await client.$queryRaw<{ table_name: string; column_name: string }[]>`
+    SELECT table_name, column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+  `;
+
+  const present = new Set(rows.map((row) => `${row.table_name}.${row.column_name}`));
+  const missing = REQUIRED_COLUMNS.filter(([table, column]) => !present.has(`${table}.${column}`));
+
+  if (missing.length === 0) {
+    const applied = await latestMigration(client);
+    return { ok: true, detail: `up to date${applied ? ` (latest migration: ${applied})` : ""}` };
+  }
+
+  if (present.size === 0) {
+    return {
+      ok: false,
+      detail:
+        "NO TABLES — migrations never ran. Expose DATABASE_URL to the Build step and redeploy, " +
+        "or run: npx prisma migrate deploy",
+    };
+  }
+
+  const applied = await latestMigration(client);
+  return {
+    ok: false,
+    detail:
+      `BEHIND THE CODE — missing ${missing.map(([t, c]) => `${t}.${c}`).join(", ")}. ` +
+      `Latest applied migration: ${applied ?? "unknown"}. ` +
+      "Every page that reads these will throw. Run: npx prisma migrate deploy",
+  };
+}
+
+/** Newest row in Prisma's own migration table, when it exists. */
+async function latestMigration(client: PrismaClientLike): Promise<string | null> {
+  try {
+    const rows = await client.$queryRaw<{ migration_name: string }[]>`
+      SELECT migration_name
+      FROM _prisma_migrations
+      WHERE finished_at IS NOT NULL
+      ORDER BY finished_at DESC
+      LIMIT 1
+    `;
+    return rows[0]?.migration_name ?? null;
+  } catch {
+    return null;
   }
 }
 

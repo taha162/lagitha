@@ -143,6 +143,24 @@ instead of a stack trace.
 Check the result at `/api/health`: the `OTP_PROVIDER` row reports whether the
 selected driver has everything it needs.
 
+### Reading /api/health
+
+Two rows are worth understanding before an incident, not during one.
+
+**`deployment`** names the build that answered. Every Vercel deployment keeps
+its own permanent URL along with the environment variables it was created
+with, so re-reading an old deployment URL after changing a variable reports the
+old answer forever. Compare `deployment.id` against the newest deployment, or
+just use the project's production domain.
+
+**`schema`** compares the database against the columns *this build's code
+reads* — not merely "do any tables exist". A database that is a migration
+behind the deployed code serves a 500 on every page that touches the missing
+column, and this row names the column and the last migration that did apply.
+If it says BEHIND THE CODE, run `npx prisma migrate deploy` against the
+production database, or make sure `DATABASE_URL` is exposed to the **Build**
+step so `npm run build` applies migrations itself.
+
 ### Map tiles
 
 The default tile URL points at `tile.openstreetmap.org`, whose usage policy is
