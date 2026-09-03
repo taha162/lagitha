@@ -48,6 +48,8 @@ export async function GET() {
     ? { ok: false, detail: "set — must be removed in production" }
     : { ok: true, detail: "not set" };
 
+  checks.STORAGE_DRIVER = describeStorage();
+
   // ---- database ----------------------------------------------------------
   if (!databaseUrl) {
     checks.database = { ok: false, detail: "skipped — no DATABASE_URL" };
@@ -308,6 +310,52 @@ function describeDeployment(): Record<string, string> {
     environment: nonEmpty(process.env.VERCEL_ENV) ?? process.env.NODE_ENV ?? "unknown",
     url: nonEmpty(process.env.VERCEL_URL) ?? "unknown",
   };
+}
+
+/**
+ * Where uploaded images go. The failure this exists to surface: `local` on a
+ * serverless host, whose filesystem is read-only, so every upload dies with
+ * ENOENT halfway through a request and nothing before that says why.
+ */
+function describeStorage(): Check {
+  const driver = nonEmpty(process.env.STORAGE_DRIVER) ?? "local";
+  const serverless = Boolean(process.env.VERCEL) || Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME);
+
+  switch (driver) {
+    case "blob":
+      return nonEmpty(process.env.BLOB_READ_WRITE_TOKEN)
+        ? { ok: true, detail: "blob — Vercel Blob store connected" }
+        : {
+            ok: false,
+            detail:
+              "blob selected but BLOB_READ_WRITE_TOKEN is not set. Create a Blob store under " +
+              "Storage in the Vercel dashboard — it sets the token — then redeploy.",
+          };
+
+    case "s3": {
+      const missing = (
+        ["S3_ENDPOINT", "S3_REGION", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const
+      ).filter((name) => !nonEmpty(process.env[name]));
+
+      return missing.length === 0
+        ? { ok: true, detail: `s3 — ${process.env.S3_BUCKET} at ${describeHost(process.env.S3_ENDPOINT!)}` }
+        : { ok: false, detail: `s3 selected but missing: ${missing.join(", ")}` };
+    }
+
+    case "local":
+      return serverless
+        ? {
+            ok: false,
+            detail:
+              "local CANNOT WORK HERE — this host's filesystem is read-only, so every image " +
+              "upload fails. Set STORAGE_DRIVER=blob (create a Blob store in the Vercel " +
+              "dashboard) or STORAGE_DRIVER=s3 with any S3-compatible bucket.",
+          }
+        : { ok: true, detail: `local — files under ${process.env.STORAGE_LOCAL_DIR ?? "./storage"}` };
+
+    default:
+      return { ok: false, detail: `unknown STORAGE_DRIVER "${driver}" — use local, blob or s3` };
+  }
 }
 
 function describeHost(url: string): string {

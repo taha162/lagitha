@@ -29,28 +29,15 @@ export function assertSafeKey(key: string): void {
 }
 
 /**
- * Objects under this prefix are national identity cards. Nothing here is ever
- * served by `/api/media`, and `mediaUrl` refuses to produce a URL for one — the
- * only way to read one is the staff route, which checks a role and writes an
- * audit entry.
- *
- * The prefix is the mechanism: a future call site that forgets the rule gets an
- * exception rather than a public link.
- */
-export const PRIVATE_KEY_PREFIX = "identity/";
-
-export function isPrivateKey(key: string): boolean {
-  return key.startsWith(PRIVATE_KEY_PREFIX);
-}
-
-/**
  * Browser-facing URL for a stored object. Pure: derived from configuration
  * alone, so it is safe to call from any server component.
+ *
+ * Everything reachable through this function is public by nature: report
+ * photos and profile pictures. Identity documents are not objects — they are
+ * columns, readable only through an audited staff route — so there is no
+ * private key for this to have to refuse.
  */
 export function mediaUrl(key: string): string {
-  if (isPrivateKey(key)) {
-    throw new Error("Refusing to build a public URL for a private object");
-  }
   if (env.storageDriver === "s3" && env.s3.publicBaseUrl) {
     return `${env.s3.publicBaseUrl.replace(/\/$/, "")}/${key}`;
   }
@@ -74,6 +61,30 @@ export function storage(): Promise<StorageProvider> {
         );
       }
       return new S3StorageProvider({ endpoint, region, bucket, accessKeyId, secretAccessKey });
+    }
+
+    if (env.storageDriver === "blob") {
+      const { BlobStorageProvider } = await import("./storage-blob");
+      if (!env.blobToken) {
+        throw new Error(
+          "STORAGE_DRIVER=blob requires BLOB_READ_WRITE_TOKEN. Creating a Blob store in the " +
+            "Vercel dashboard sets it for you; redeploy afterwards so the deployment picks it up.",
+        );
+      }
+      return new BlobStorageProvider(env.blobToken);
+    }
+
+    // The filesystem is not writable on a serverless host, and the failure
+    // otherwise surfaces as ENOENT on `mkdir /var/task/storage` in the middle
+    // of an upload — a stack trace that says nothing about the actual mistake.
+    // Refuse at the boundary instead, naming both ways out.
+    if (env.isServerless) {
+      throw new Error(
+        "STORAGE_DRIVER=local cannot work on this host: the filesystem is read-only, so uploads " +
+          "have nowhere to go. Use STORAGE_DRIVER=blob (create a Blob store in the Vercel " +
+          "dashboard, which sets BLOB_READ_WRITE_TOKEN) or STORAGE_DRIVER=s3 with any " +
+          "S3-compatible bucket.",
+      );
     }
 
     const { LocalStorageProvider } = await import("./storage-local");

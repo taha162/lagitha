@@ -30,7 +30,7 @@ startup if it is missing or wrong. Before going live you must set:
 | `DATABASE_URL` | |
 | `SESSION_SECRET` | 32+ random chars — `openssl rand -base64 48`. Startup refuses a dev placeholder or anything shorter. |
 | `OTP_PROVIDER` | **not** `console` — startup refuses it in production, because that driver prints login codes to the log. Required for sign-up and password reset even though sign-in is a password. |
-| `STORAGE_DRIVER` | `s3` for anything with more than one app node |
+| `STORAGE_DRIVER` | **not** `local` on a serverless host — the filesystem is read-only, and startup refuses it. `blob` on Vercel, or `s3` for any S3-compatible bucket. Also required for more than one app node. |
 | `NEXT_PUBLIC_SITE_URL` | used for canonical URLs, Open Graph and the sitemap |
 
 `OTP_DEV_FIXED_CODE` must be unset in production; startup refuses it.
@@ -160,6 +160,30 @@ column, and this row names the column and the last migration that did apply.
 If it says BEHIND THE CODE, run `npx prisma migrate deploy` against the
 production database, or make sure `DATABASE_URL` is exposed to the **Build**
 step so `npm run build` applies migrations itself.
+
+### Where images go
+
+Two different answers, because two different kinds of image:
+
+| what | where | why |
+|---|---|---|
+| report photos, profile pictures | object storage (`STORAGE_DRIVER`) | public by nature, served straight to browsers |
+| national ID card images | `identity_verifications` columns | must be authorised by role, not by URL — and deleted within days |
+
+`local` writes to the filesystem. That works in development and on a single
+server with a persistent disk, and **cannot** work on Vercel or Lambda, where
+the application is bundled onto a read-only filesystem: every upload fails with
+`ENOENT: mkdir '/var/task/storage'`. Startup refuses the combination and
+`/api/health` flags it, so this is caught before a user hits it.
+
+On Vercel the shortest path is `STORAGE_DRIVER=blob`: create a Blob store under
+Storage in the dashboard, which sets `BLOB_READ_WRITE_TOKEN`, and redeploy.
+`s3` stays the portable option and works with Cloudflare R2 and Backblaze B2 as
+well as AWS.
+
+Identity cards need none of this. They are stored in Postgres and never become
+objects, so a deployment with no bucket at all can still verify members and
+publish reports — only photos are unavailable.
 
 ### Map tiles
 

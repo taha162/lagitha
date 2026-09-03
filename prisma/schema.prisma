@@ -593,14 +593,19 @@ model AdminAction {
 /// The two card images are the most sensitive data the platform ever holds, so
 /// the model is built around getting rid of them:
 ///
-///   * the storage keys live under a private prefix that `/api/media` refuses
-///     to serve, and are readable only through the staff route, which writes an
-///     AdminAction every time an image is opened;
-///   * `frontKey` / `backKey` are cleared and the objects deleted the moment a
-///     decision is recorded — a decided verification keeps the decision, not
-///     the document;
+///   * the images live in this table rather than in object storage. They are
+///     small, there are two per member, and they are deleted within days —
+///     the profile where a column beats a bucket. It also settles a question a
+///     bucket cannot: object storage authorises by URL, and an identity
+///     document must be authorised by *role*. Here the only reader is the
+///     staff route, which checks one and writes an AdminAction per view;
+///   * `frontImage` / `backImage` are cleared the moment a decision is
+///     recorded — a decided verification keeps the decision, not the document;
 ///   * the card *number* is never asked for or stored. A human comparing the
 ///     photo to the name on the account is the whole check.
+///
+/// Every query in the codebase selects explicit fields, because Prisma would
+/// otherwise pull both images into a list of pending cards.
 model IdentityVerification {
   id     String @id @default(cuid())
   userId String @unique
@@ -608,9 +613,9 @@ model IdentityVerification {
 
   status IdentityStatus @default(PENDING)
 
-  /// PRIVATE storage keys, null once the images have been purged.
-  frontKey String?
-  backKey  String?
+  /// PRIVATE. Re-encoded WebP, roughly 100–200 KB each. Null once purged.
+  frontImage Bytes?
+  backImage  Bytes?
   /// Name as written on the card, so a reviewer can compare it with the
   /// account's display name without holding the image any longer than needed.
   cardName String?

@@ -108,11 +108,12 @@ Identity cards are read by a person, not by a model. See
    *وثيقة شخصية* with no description and no images — shareable by link, and
    excluded from the search index.
 3. **An identity card is deleted the moment it is judged.** Both sides of the
-   national ID are required before a person can publish, and they are stored
-   under a prefix that the public media route refuses, readable only through a
-   staff route that logs every single view. The decision write is the same
-   write that clears the keys and deletes the objects — an approved account
-   keeps a date, never the document. The card number is never asked for.
+   national ID are required before a person can publish, and they are stored as
+   database columns rather than objects — object storage authorises by URL, and
+   a document like this has to be authorised by role. The only reader is a staff
+   route that logs every single view, and the decision write is the same write
+   that clears the images: an approved account keeps a date, never the document.
+   The card number is never asked for.
 4. **A finder must commit before they see a claim.** The claimant answers a
    question about a detail that was never published; the finder only sees that
    answer *after* recording what they expect it to be, and the finder's secret
@@ -134,7 +135,7 @@ fallback, in `src/lib/providers/`:
 | interface | default | swap in |
 |---|---|---|
 | `OtpDeliveryProvider` | `console` (prints the code to the log) | `smtp` / `resend` (email) or `twilio` / `http` (SMS) |
-| `StorageProvider` | `local` (files under `./storage`) | any S3-compatible bucket |
+| `StorageProvider` | `local` (files under `./storage`) | `blob` (Vercel Blob) or `s3` (any S3-compatible bucket). `local` cannot work on a serverless host and is refused there. |
 | `AIAnalysisProvider` | `none` | a model, as an *enhancement* only |
 | `GeocodingProvider` | local lookup over the seeded Mosul neighbourhoods | a geocoding service |
 

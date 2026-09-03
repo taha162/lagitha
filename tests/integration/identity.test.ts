@@ -5,11 +5,12 @@ import {
   getIdentity,
   identityBadge,
   publishGate,
+  pendingIdentities,
   purgeDecidedIdentityImages,
   readIdentityImage,
   submitIdentity,
 } from "@/lib/services/identity";
-import { isPrivateKey, mediaUrl, storage } from "@/lib/providers/storage";
+import { storage } from "@/lib/providers/storage";
 import { toPublicReport } from "@/lib/privacy";
 import { createReportFixture, createUser, resetDatabase, testDb } from "../helpers/db";
 
@@ -24,15 +25,21 @@ import { createReportFixture, createUser, resetDatabase, testDb } from "../helpe
 beforeAll(resetDatabase);
 beforeEach(resetDatabase);
 
-/** A real image, because sharp will reject anything that is not one. */
-async function cardImage(label: string) {
-  const buffer = await sharp({
-    create: { width: 600, height: 380, channels: 3, background: { r: 220, g: 225, b: 220 } },
-  })
+/**
+ * A real image, because sharp will reject anything that is not one. The two
+ * sides are given different colours so a test can tell them apart — the front
+ * and back of a card are not interchangeable, and neither should the stored
+ * bytes be.
+ */
+async function cardImage(side: "front" | "back") {
+  const background =
+    side === "front" ? { r: 220, g: 225, b: 220 } : { r: 140, g: 150, b: 200 };
+
+  const buffer = await sharp({ create: { width: 600, height: 380, channels: 3, background } })
     .png()
     .toBuffer();
 
-  return { buffer, size: buffer.byteLength, label };
+  return { buffer, size: buffer.byteLength };
 }
 
 async function submitFor(userId: string) {
@@ -75,53 +82,70 @@ describe("the publish gate", () => {
 });
 
 describe("submitting a card", () => {
-  it("stores both sides under the private prefix", async () => {
+  it("stores both sides in the database, not in object storage", async () => {
     const user = await createUser();
     const record = await submitFor(user.id);
 
     expect(record.status).toBe("PENDING");
-    expect(record.frontKey).toBeTruthy();
-    expect(record.backKey).toBeTruthy();
-    expect(isPrivateKey(record.frontKey!)).toBe(true);
-    expect(isPrivateKey(record.backKey!)).toBe(true);
-    // Two sides, two objects — never the same file stored twice.
-    expect(record.frontKey).not.toBe(record.backKey);
 
-    const store = await storage();
-    expect(await store.get(record.frontKey!)).not.toBeNull();
-    expect(await store.get(record.backKey!)).not.toBeNull();
-  });
-
-  it("refuses to produce a public URL for a stored card", async () => {
-    const user = await createUser();
-    const record = await submitFor(user.id);
-
-    // The failure mode this prevents: a future call site treating an identity
-    // key like a report photo and rendering a link to it.
-    expect(() => mediaUrl(record.frontKey!)).toThrow(/private/i);
-  });
-
-  it("is not served by the unauthenticated media route, even with the exact key", async () => {
-    const user = await createUser();
-    const record = await submitFor(user.id);
-
-    // `/api/media` is deliberately open — an image on a public report is
-    // public — so it has to refuse this prefix outright. Holding the key is
-    // not authorisation.
-    const { GET } = await import("@/app/api/media/[...key]/route");
-    const response = await GET(new Request("http://localhost/api/media"), {
-      params: Promise.resolve({ key: record.frontKey!.split("/") }),
+    // Read back through the raw client, since the service never selects these.
+    const stored = await testDb.identityVerification.findUniqueOrThrow({
+      where: { id: record.id },
+      select: { frontImage: true, backImage: true },
     });
 
-    expect(response.status).toBe(404);
+    expect(stored.frontImage).not.toBeNull();
+    expect(stored.backImage).not.toBeNull();
+    // Each side is stored as itself: reading "front" must not hand back the
+    // back of the card.
+    expect(Buffer.from(stored.frontImage!).equals(Buffer.from(stored.backImage!))).toBe(false);
+
+    const staff = await createUser({ role: "MODERATOR" });
+    const front = await readIdentityImage(staff, record.id, "front");
+    expect(Buffer.from(front!).equals(Buffer.from(stored.frontImage!))).toBe(true);
+  });
+
+  it("puts nothing in object storage at all", async () => {
+    const user = await createUser();
+    await submitFor(user.id);
+
+    // The invariant that makes the URL question moot: an identity document has
+    // no object, so there is no link to leak, expire or forget to protect.
+    const store = await storage();
+    const seen: string[] = [];
+    const original = store.put.bind(store);
+    store.put = async (key, body, contentType) => {
+      seen.push(key);
+      return original(key, body, contentType);
+    };
+
+    const second = await createUser();
+    await submitFor(second.id);
+    expect(seen).toEqual([]);
+
+    store.put = original;
+  });
+
+  it("never returns the images from the ordinary read path", async () => {
+    const user = await createUser();
+    await submitFor(user.id);
+
+    // A list of pending cards must not drag a few hundred kilobytes of
+    // identity document into memory, nor into anything that serialises it.
+    const record = await getIdentity(user.id);
+    expect(Object.keys(record!)).not.toContain("frontImage");
+    expect(Object.keys(record!)).not.toContain("backImage");
+
+    const [queued] = await pendingIdentities();
+    expect(Object.keys(queued!)).not.toContain("frontImage");
   });
 
   it("re-encodes the upload, so EXIF — including any GPS tag — does not survive", async () => {
     const user = await createUser();
+    const staff = await createUser({ role: "MODERATOR" });
     const record = await submitFor(user.id);
 
-    const store = await storage();
-    const stored = await store.get(record.frontKey!);
+    const stored = await readIdentityImage(staff, record.id, "front");
     const metadata = await sharp(stored!).metadata();
 
     expect(metadata.format).toBe("webp");
@@ -136,11 +160,9 @@ describe("submitting a card", () => {
     // does not exist, and this fails the moment somebody adds one — which is
     // the change that would need arguing about, not a runtime value.
     expect(Object.keys(record).sort()).toEqual([
-      "backKey",
       "cardName",
       "createdAt",
       "decisionNote",
-      "frontKey",
       "id",
       "purgedAt",
       "reviewedAt",
@@ -167,10 +189,11 @@ describe("submitting a card", () => {
     // The decision from the previous round must not sit next to new images.
     expect(second.decisionNote).toBeNull();
     expect(second.reviewedAt).toBeNull();
-    expect(second.frontKey).not.toBe(first.frontKey);
 
-    const store = await storage();
-    expect(await store.get(first.frontKey!)).toBeNull();
+    // The images are the new ones, and the old ones are simply gone: the
+    // column was overwritten, so there is no orphan anywhere to sweep up.
+    const staff = await createUser({ role: "MODERATOR" });
+    expect(await readIdentityImage(staff, second.id, "front")).not.toBeNull();
   });
 });
 
@@ -194,7 +217,6 @@ describe("reviewing", () => {
     const user = await createUser();
     const staff = await createUser({ role: "ADMIN" });
     const submitted = await submitFor(user.id);
-    const store = await storage();
 
     const decided = await decideIdentity({
       staff,
@@ -203,16 +225,19 @@ describe("reviewing", () => {
     });
 
     expect(decided!.status).toBe("APPROVED");
-    expect(decided!.frontKey).toBeNull();
-    expect(decided!.backKey).toBeNull();
     expect(decided!.purgedAt).not.toBeNull();
 
-    // Not merely dereferenced — gone from storage.
-    expect(await store.get(submitted.frontKey!)).toBeNull();
-    expect(await store.get(submitted.backKey!)).toBeNull();
+    // Not merely dereferenced — the columns are empty.
+    const stored = await testDb.identityVerification.findUniqueOrThrow({
+      where: { id: submitted.id },
+      select: { frontImage: true, backImage: true },
+    });
+    expect(stored.frontImage).toBeNull();
+    expect(stored.backImage).toBeNull();
 
     // And unreachable afterwards, even for staff.
     expect(await readIdentityImage(staff, submitted.id, "front")).toBeNull();
+    expect(await readIdentityImage(staff, submitted.id, "back")).toBeNull();
   });
 
   it("writes an audit entry and tells the member the outcome", async () => {
@@ -274,8 +299,8 @@ describe("the sweep", () => {
     const user = await createUser();
     const submitted = await submitFor(user.id);
 
-    // What a storage outage during `decideIdentity` would leave: a decided row
-    // still pointing at its objects.
+    // What a row restored from a backup taken before the purge looks like: a
+    // decided verification that still carries its images.
     await testDb.identityVerification.update({
       where: { id: submitted.id },
       data: { status: "APPROVED", reviewedAt: new Date() },
@@ -285,10 +310,11 @@ describe("the sweep", () => {
 
     const after = await testDb.identityVerification.findUniqueOrThrow({
       where: { id: submitted.id },
+      select: { frontImage: true, backImage: true, purgedAt: true },
     });
-    expect(after.frontKey).toBeNull();
+    expect(after.frontImage).toBeNull();
+    expect(after.backImage).toBeNull();
     expect(after.purgedAt).not.toBeNull();
-    expect(await (await storage()).get(submitted.frontKey!)).toBeNull();
   });
 
   it("leaves a pending card alone", async () => {
@@ -296,7 +322,12 @@ describe("the sweep", () => {
     const submitted = await submitFor(user.id);
 
     expect(await purgeDecidedIdentityImages()).toBe(0);
-    expect(await (await storage()).get(submitted.frontKey!)).not.toBeNull();
+
+    const after = await testDb.identityVerification.findUniqueOrThrow({
+      where: { id: submitted.id },
+      select: { frontImage: true },
+    });
+    expect(after.frontImage).not.toBeNull();
   });
 });
 
