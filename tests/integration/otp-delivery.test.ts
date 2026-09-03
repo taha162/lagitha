@@ -190,6 +190,49 @@ describe("email drivers", () => {
     );
   });
 
+  it("derives the sender from SMTP_USER when MAIL_FROM is not set", async () => {
+    // Gmail, Brevo and every hosted provider reject a From: that is not the
+    // authenticated account, so the account is the only correct default —
+    // and one fewer variable is one fewer variable to get wrong.
+    const provider = await loadOtp({
+      OTP_PROVIDER: "smtp",
+      SMTP_HOST: "smtp.gmail.com",
+      SMTP_USER: "someone@gmail.com",
+      SMTP_PASS: "app-password",
+      MAIL_FROM: "",
+    });
+
+    expect(provider.name).toBe("smtp");
+
+    const { env } = await import("@/lib/env");
+    expect(env.smtp.from).toBe("لَگيتها <someone@gmail.com>");
+  });
+
+  it("prefers an explicit MAIL_FROM over the derived one", async () => {
+    await loadOtp({
+      OTP_PROVIDER: "smtp",
+      SMTP_HOST: "smtp.example.com",
+      SMTP_USER: "relay-account",
+      MAIL_FROM: "لَگيتها <no-reply@lagaitha.iq>",
+    });
+
+    const { env } = await import("@/lib/env");
+    expect(env.smtp.from).toBe("لَگيتها <no-reply@lagaitha.iq>");
+  });
+
+  it("still refuses to start when neither a sender nor a user is configured", async () => {
+    const provider = await loadOtp({
+      OTP_PROVIDER: "smtp",
+      SMTP_HOST: "smtp.example.com",
+      SMTP_USER: "",
+      MAIL_FROM: "",
+    });
+
+    // Nothing to put in the From: header — refusing beats sending mail that
+    // every provider will bounce.
+    expect(provider.name).toBe("disabled");
+  });
+
   it("renders the code and Arabic copy into both text and HTML parts", async () => {
     const { renderOtpEmail } = await import("@/lib/providers/otp-email");
     const { subject, text, html } = renderOtpEmail("482913");

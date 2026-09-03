@@ -33,6 +33,31 @@ function optional(name: string, fallback: string): string {
   return value && value.length > 0 ? value : fallback;
 }
 
+/** Brand name on outgoing mail, so the sender is not a bare address. */
+const MAIL_DISPLAY_NAME = "لَگيتها";
+
+/**
+ * The sender address for SMTP.
+ *
+ * Falls back to the authenticated account when MAIL_FROM is not set, because
+ * for every hosted provider that is the only sender they will accept anyway:
+ * Gmail, Brevo and the rest reject a From: that is not the account that
+ * authenticated. Deriving it removes a second variable to get wrong — and
+ * getting it wrong produced mail that silently never arrived.
+ *
+ * MAIL_FROM still wins when set, which is what a self-hosted relay or a
+ * verified domain needs.
+ */
+function mailFrom(): string | undefined {
+  const explicit = process.env.MAIL_FROM;
+  if (explicit && explicit.trim().length > 0) return explicit;
+
+  const user = process.env.SMTP_USER;
+  if (user && user.trim().length > 0) return `${MAIL_DISPLAY_NAME} <${user.trim()}>`;
+
+  return undefined;
+}
+
 /**
  * Reads a variable holding a JSON object, e.g. SMS gateway headers.
  * Malformed JSON is a configuration mistake worth failing on, not ignoring.
@@ -117,7 +142,7 @@ export const env = {
     secure: optional("SMTP_SECURE", integer("SMTP_PORT", 587) === 465 ? "true" : "false") === "true",
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
-    from: process.env.MAIL_FROM,
+    from: mailFrom(),
   },
   /** Development shortcut so demo accounts can sign in without an SMS gateway. */
   otpFixedCode: isProduction ? undefined : process.env.OTP_DEV_FIXED_CODE,

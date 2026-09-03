@@ -122,11 +122,17 @@ export async function GET() {
     {
       ok: failures.length === 0,
       failing: failures,
+      // Which build answered. On Vercel, every deployment keeps its own
+      // permanent URL along with the environment variables it was created
+      // with — so adding a variable and then re-reading the *old* deployment
+      // URL shows the old answer forever, which looks exactly like the change
+      // not having worked. Compare this against the newest deployment.
+      deployment: describeDeployment(),
       checks,
       hint:
         failures.length === 0
           ? "All preconditions met."
-          : "Fix the entries marked ok:false, then redeploy.",
+          : "Fix the entries marked ok:false, redeploy, then re-read this on the NEW deployment URL (or the project's production domain).",
     },
     {
       status: failures.length === 0 ? 200 : 503,
@@ -172,17 +178,44 @@ function describeOtpProvider(provider: string): Check {
     }
 
     case "smtp": {
+      const host = nonEmpty(process.env.SMTP_HOST);
+      const user = nonEmpty(process.env.SMTP_USER);
+      const pass = nonEmpty(process.env.SMTP_PASS);
+
+      // Mirrors `mailFrom()` in src/lib/env.ts: an unset MAIL_FROM falls back
+      // to the authenticated account, which is the only sender a hosted
+      // provider accepts anyway.
+      const explicitFrom = nonEmpty(process.env.MAIL_FROM);
+      const from = explicitFrom ?? (user ? `لَگيتها <${user}>` : undefined);
+
       const missing = [
-        !nonEmpty(process.env.SMTP_HOST) && "SMTP_HOST",
-        !nonEmpty(process.env.MAIL_FROM) && "MAIL_FROM",
+        !host && "SMTP_HOST",
+        !from && "MAIL_FROM (or SMTP_USER to derive it from)",
       ].filter((value): value is string => Boolean(value));
 
-      return missing.length === 0
-        ? {
-            ok: true,
-            detail: `smtp — ${process.env.SMTP_HOST}:${process.env.SMTP_PORT ?? 587} as ${process.env.MAIL_FROM}`,
-          }
-        : { ok: false, detail: `smtp selected but missing: ${missing.join(", ")}` };
+      if (missing.length > 0) {
+        return { ok: false, detail: `smtp selected but missing: ${missing.join(", ")}` };
+      }
+
+      const auth = user && pass ? `authenticating as ${user}` : "NO AUTH SET";
+      const derived = explicitFrom ? "" : " (derived from SMTP_USER)";
+
+      // A relay on a private network legitimately needs no credentials, so an
+      // unauthenticated transport is not an error — but Gmail, Brevo and every
+      // hosted provider will refuse it, and the failure only shows up as a
+      // send that silently does not arrive. Say so here instead.
+      const senderMismatch =
+        user && from && !from.toLowerCase().includes(user.toLowerCase())
+          ? " — WARNING: MAIL_FROM does not contain SMTP_USER; Gmail and most providers refuse that"
+          : "";
+
+      return {
+        ok: true,
+        detail:
+          `smtp — ${host}:${process.env.SMTP_PORT ?? 587}, ${auth}, ` +
+          `sending as ${from}${derived}` +
+          senderMismatch,
+      };
     }
 
     case "console":
@@ -199,6 +232,20 @@ function describeOtpProvider(provider: string): Check {
           "'resend' or 'smtp' (email), or 'twilio' / 'http' (SMS).",
       };
   }
+}
+
+/**
+ * Identifies the running build. Vercel sets these; anywhere else they are
+ * absent and the fields say so rather than being omitted.
+ */
+function describeDeployment(): Record<string, string> {
+  return {
+    id: nonEmpty(process.env.VERCEL_DEPLOYMENT_ID) ?? "not on Vercel",
+    commit: (nonEmpty(process.env.VERCEL_GIT_COMMIT_SHA) ?? "unknown").slice(0, 7),
+    branch: nonEmpty(process.env.VERCEL_GIT_COMMIT_REF) ?? "unknown",
+    environment: nonEmpty(process.env.VERCEL_ENV) ?? process.env.NODE_ENV ?? "unknown",
+    url: nonEmpty(process.env.VERCEL_URL) ?? "unknown",
+  };
 }
 
 function describeHost(url: string): string {

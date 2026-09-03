@@ -128,15 +128,28 @@ describe("submitting a card", () => {
     expect(metadata.exif).toBeUndefined();
   });
 
-  it("does not ask for or store the card number", async () => {
+  it("has no field for the card number", async () => {
     const user = await createUser();
     const record = await submitFor(user.id);
 
-    // The whole record, serialised: no field anywhere holds a card number,
-    // because none is ever collected.
-    const serialised = JSON.stringify(record);
-    expect(Object.keys(record)).not.toContain("cardNumber");
-    expect(serialised).not.toMatch(/\d{10,}/);
+    // The whole row, spelled out. A card number cannot leak from a column that
+    // does not exist, and this fails the moment somebody adds one — which is
+    // the change that would need arguing about, not a runtime value.
+    expect(Object.keys(record).sort()).toEqual([
+      "backKey",
+      "cardName",
+      "createdAt",
+      "decisionNote",
+      "frontKey",
+      "id",
+      "purgedAt",
+      "reviewedAt",
+      "reviewedById",
+      "status",
+      "submittedAt",
+      "updatedAt",
+      "userId",
+    ]);
   });
 
   it("deletes the previous attempt's images when a rejected card is resubmitted", async () => {
