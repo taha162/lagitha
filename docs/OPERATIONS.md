@@ -63,8 +63,14 @@ SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=you@gmail.com
 SMTP_PASS=xxxx xxxx xxxx xxxx     # a Gmail App Password, not your password
-MAIL_FROM=لَگيتها <you@gmail.com>
 ```
+
+`MAIL_FROM` is optional for SMTP: left unset, the sender becomes
+`لَگيتها <SMTP_USER>`. Gmail, Brevo and every hosted provider reject a
+`From:` that is not the account that authenticated, so the authenticated
+account is the only correct answer — deriving it removes a variable whose only
+possible wrong values produce mail that silently never arrives. Set it
+explicitly for a self-hosted relay, or once you own a verified domain.
 
 Gmail requires 2-factor authentication on the account before it will issue an
 App Password, and caps sending at roughly 500 a day. Brevo

@@ -179,18 +179,26 @@ function describeOtpProvider(provider: string): Check {
 
     case "smtp": {
       const host = nonEmpty(process.env.SMTP_HOST);
-      const from = nonEmpty(process.env.MAIL_FROM);
-      const missing = [!host && "SMTP_HOST", !from && "MAIL_FROM"].filter(
-        (value): value is string => Boolean(value),
-      );
+      const user = nonEmpty(process.env.SMTP_USER);
+      const pass = nonEmpty(process.env.SMTP_PASS);
+
+      // Mirrors `mailFrom()` in src/lib/env.ts: an unset MAIL_FROM falls back
+      // to the authenticated account, which is the only sender a hosted
+      // provider accepts anyway.
+      const explicitFrom = nonEmpty(process.env.MAIL_FROM);
+      const from = explicitFrom ?? (user ? `لَگيتها <${user}>` : undefined);
+
+      const missing = [
+        !host && "SMTP_HOST",
+        !from && "MAIL_FROM (or SMTP_USER to derive it from)",
+      ].filter((value): value is string => Boolean(value));
 
       if (missing.length > 0) {
         return { ok: false, detail: `smtp selected but missing: ${missing.join(", ")}` };
       }
 
-      const user = nonEmpty(process.env.SMTP_USER);
-      const pass = nonEmpty(process.env.SMTP_PASS);
       const auth = user && pass ? `authenticating as ${user}` : "NO AUTH SET";
+      const derived = explicitFrom ? "" : " (derived from SMTP_USER)";
 
       // A relay on a private network legitimately needs no credentials, so an
       // unauthenticated transport is not an error — but Gmail, Brevo and every
@@ -204,7 +212,8 @@ function describeOtpProvider(provider: string): Check {
       return {
         ok: true,
         detail:
-          `smtp — ${host}:${process.env.SMTP_PORT ?? 587}, ${auth}, sending as ${from}` +
+          `smtp — ${host}:${process.env.SMTP_PORT ?? 587}, ${auth}, ` +
+          `sending as ${from}${derived}` +
           senderMismatch,
       };
     }
