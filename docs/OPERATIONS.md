@@ -20,6 +20,33 @@ npm run start
 into `src/generated/`, which is gitignored, so a fresh clone must build before
 it can typecheck.
 
+### Migrations and deploys
+
+`npm run build` runs `prisma migrate deploy` before `next build`, so a
+deployment brings its own schema with it and nobody needs a terminal.
+
+Two rules make that safe, and both were learned the hard way.
+
+**A preview deployment must not migrate.** On Vercel a preview build inherits
+the project's environment variables, `DATABASE_URL` included — so migrating
+during a preview build rewrites the schema underneath the code production is
+still serving. The symptom is production throwing `P2022: The column ... does
+not exist` on a column it was built to read. `db:deploy:auto` now skips the
+migration whenever `VERCEL_ENV` is set to anything other than `production`.
+If you want previews to run migrations, give them their own database by
+scoping a separate `DATABASE_URL` to the Preview environment.
+
+**A migration must be deployable before the code that needs it.** There is a
+window during every deploy where the new schema is live and the old build is
+still serving requests. A migration that only *adds* nullable columns is
+invisible to the old code; one that drops or renames a column breaks it
+instantly. To remove a column, do it in two releases: stop reading it, deploy,
+then drop it in a later migration.
+
+If production is throwing `P2022` right now, the fix is forward, not back:
+deploy the build that matches the schema. Rolling the database back would
+break the deployment that already migrated.
+
 ### Environment
 
 Everything the server reads is declared in `src/lib/env.ts` and fails loudly at
