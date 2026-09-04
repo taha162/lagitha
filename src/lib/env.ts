@@ -162,8 +162,17 @@ export const env = {
     headers: parseJsonRecord("SMS_HTTP_HEADERS"),
   },
 
+  /** local | blob | s3 — see providers/storage.ts */
   storageDriver: optional("STORAGE_DRIVER", "local"),
   storageLocalDir: optional("STORAGE_LOCAL_DIR", "./storage"),
+  /** Set for you when a Blob store is created in the Vercel dashboard. */
+  blobToken: process.env.BLOB_READ_WRITE_TOKEN,
+  /**
+   * True on a host that bundles the application onto a read-only filesystem.
+   * Vercel sets `VERCEL`; the check exists so the storage layer can refuse the
+   * local driver with an explanation instead of failing mid-upload.
+   */
+  isServerless: Boolean(process.env.VERCEL) || Boolean(process.env.AWS_LAMBDA_FUNCTION_NAME),
   s3: {
     endpoint: process.env.S3_ENDPOINT,
     region: process.env.S3_REGION,

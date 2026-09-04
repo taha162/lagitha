@@ -20,6 +20,33 @@ npm run start
 into `src/generated/`, which is gitignored, so a fresh clone must build before
 it can typecheck.
 
+### Migrations and deploys
+
+`npm run build` runs `prisma migrate deploy` before `next build`, so a
+deployment brings its own schema with it and nobody needs a terminal.
+
+Two rules make that safe, and both were learned the hard way.
+
+**A preview deployment must not migrate.** On Vercel a preview build inherits
+the project's environment variables, `DATABASE_URL` included — so migrating
+during a preview build rewrites the schema underneath the code production is
+still serving. The symptom is production throwing `P2022: The column ... does
+not exist` on a column it was built to read. `db:deploy:auto` now skips the
+migration whenever `VERCEL_ENV` is set to anything other than `production`.
+If you want previews to run migrations, give them their own database by
+scoping a separate `DATABASE_URL` to the Preview environment.
+
+**A migration must be deployable before the code that needs it.** There is a
+window during every deploy where the new schema is live and the old build is
+still serving requests. A migration that only *adds* nullable columns is
+invisible to the old code; one that drops or renames a column breaks it
+instantly. To remove a column, do it in two releases: stop reading it, deploy,
+then drop it in a later migration.
+
+If production is throwing `P2022` right now, the fix is forward, not back:
+deploy the build that matches the schema. Rolling the database back would
+break the deployment that already migrated.
+
 ### Environment
 
 Everything the server reads is declared in `src/lib/env.ts` and fails loudly at
@@ -30,7 +57,7 @@ startup if it is missing or wrong. Before going live you must set:
 | `DATABASE_URL` | |
 | `SESSION_SECRET` | 32+ random chars — `openssl rand -base64 48`. Startup refuses a dev placeholder or anything shorter. |
 | `OTP_PROVIDER` | **not** `console` — startup refuses it in production, because that driver prints login codes to the log. Required for sign-up and password reset even though sign-in is a password. |
-| `STORAGE_DRIVER` | `s3` for anything with more than one app node |
+| `STORAGE_DRIVER` | **not** `local` on a serverless host — the filesystem is read-only, and startup refuses it. `blob` on Vercel, or `s3` for any S3-compatible bucket. Also required for more than one app node. |
 | `NEXT_PUBLIC_SITE_URL` | used for canonical URLs, Open Graph and the sitemap |
 
 `OTP_DEV_FIXED_CODE` must be unset in production; startup refuses it.
@@ -142,6 +169,48 @@ instead of a stack trace.
 
 Check the result at `/api/health`: the `OTP_PROVIDER` row reports whether the
 selected driver has everything it needs.
+
+### Reading /api/health
+
+Two rows are worth understanding before an incident, not during one.
+
+**`deployment`** names the build that answered. Every Vercel deployment keeps
+its own permanent URL along with the environment variables it was created
+with, so re-reading an old deployment URL after changing a variable reports the
+old answer forever. Compare `deployment.id` against the newest deployment, or
+just use the project's production domain.
+
+**`schema`** compares the database against the columns *this build's code
+reads* — not merely "do any tables exist". A database that is a migration
+behind the deployed code serves a 500 on every page that touches the missing
+column, and this row names the column and the last migration that did apply.
+If it says BEHIND THE CODE, run `npx prisma migrate deploy` against the
+production database, or make sure `DATABASE_URL` is exposed to the **Build**
+step so `npm run build` applies migrations itself.
+
+### Where images go
+
+Two different answers, because two different kinds of image:
+
+| what | where | why |
+|---|---|---|
+| report photos, profile pictures | object storage (`STORAGE_DRIVER`) | public by nature, served straight to browsers |
+| national ID card images | `identity_verifications` columns | must be authorised by role, not by URL — and deleted within days |
+
+`local` writes to the filesystem. That works in development and on a single
+server with a persistent disk, and **cannot** work on Vercel or Lambda, where
+the application is bundled onto a read-only filesystem: every upload fails with
+`ENOENT: mkdir '/var/task/storage'`. Startup refuses the combination and
+`/api/health` flags it, so this is caught before a user hits it.
+
+On Vercel the shortest path is `STORAGE_DRIVER=blob`: create a Blob store under
+Storage in the dashboard, which sets `BLOB_READ_WRITE_TOKEN`, and redeploy.
+`s3` stays the portable option and works with Cloudflare R2 and Backblaze B2 as
+well as AWS.
+
+Identity cards need none of this. They are stored in Postgres and never become
+objects, so a deployment with no bucket at all can still verify members and
+publish reports — only photos are unavailable.
 
 ### Map tiles
 

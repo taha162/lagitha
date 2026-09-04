@@ -172,7 +172,7 @@ export async function verifyIdentity(
       cardName: "اسم على البطاقة",
       // An approved or rejected record never keeps its images.
       ...(status === "PENDING"
-        ? { frontKey: "identity/cards/test-front.webp", backKey: "identity/cards/test-back.webp" }
+        ? {}
         : { reviewedAt: new Date(), purgedAt: new Date() }),
     },
   });

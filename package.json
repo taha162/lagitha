@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && npm run db:deploy:auto && next build",
-    "db:deploy:auto": "sh -c 'if [ -n \"$DATABASE_URL$POSTGRES_PRISMA_URL$POSTGRES_URL$DATABASE_URL_UNPOOLED$POSTGRES_URL_NON_POOLING\" ]; then prisma migrate deploy && tsx prisma/seed.ts; else echo \"No database connection string at build time — skipping migrate deploy\"; fi'",
+    "db:deploy:auto": "sh -c 'if [ -n \"$VERCEL_ENV\" ] && [ \"$VERCEL_ENV\" != \"production\" ]; then echo \"Preview deployment — skipping migrate deploy: a preview shares DATABASE_URL with production, and migrating here would change the schema under the running production build.\"; elif [ -n \"$DATABASE_URL$POSTGRES_PRISMA_URL$POSTGRES_URL$DATABASE_URL_UNPOOLED$POSTGRES_URL_NON_POOLING\" ]; then prisma migrate deploy && tsx prisma/seed.ts; else echo \"No database connection string at build time — skipping migrate deploy\"; fi'",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
@@ -21,6 +21,7 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "7.10.0",
+    "@vercel/blob": "^2.8.0",
     "clsx": "2.1.1",
     "leaflet": "1.9.4",
     "lucide-react": "1.38.0",

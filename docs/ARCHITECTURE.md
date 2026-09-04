@@ -307,19 +307,26 @@ a person comparing a photograph with a name.
 **These are the most sensitive images the platform will ever hold, so the
 design is built around getting rid of them:**
 
-1. They are stored under an `identity/` key prefix. `mediaUrl` throws rather
-   than building a public URL for that prefix, and `/api/media` — which is
-   deliberately unauthenticated, because a photo on a public report is public —
-   refuses it outright. Holding the key is not authorisation.
-2. The only way to read one is a staff route that checks a role and writes an
+1. **They are columns, not objects.** Object storage authorises by URL —
+   whoever holds the link holds the document — and an identity card has to be
+   authorised by *role*. A `bytea` column has no URL to leak, expire, or forget
+   to protect. It is also simply the right shape for this data: two images per
+   member, a couple of hundred kilobytes each, deleted within days. That is the
+   profile where a column beats a bucket, and it means a deployment with no
+   object storage configured at all can still verify members.
+2. The only reader is a staff route that checks a role and writes an
    `AdminAction` naming the viewer *before* it reads a byte. Opening someone's
    ID card is an event, not a page view.
-3. The images are deleted in the same step that records the decision — not by a
-   scheduled job that might not run. A verified account keeps a decision and a
-   date, never the document. `purgeDecidedIdentityImages()` exists only to
-   sweep up after a storage outage mid-decision.
+3. The images are cleared in the same transaction that records the decision —
+   not by a scheduled job that might not run, and not in a second system that
+   could be unreachable at that moment. A verified account keeps a decision and
+   a date, never the document. `purgeDecidedIdentityImages()` exists only for a
+   row restored from a backup taken before its purge.
 4. The card *number* is never asked for and has no column. A number we do not
    collect cannot leak.
+
+Every query selects explicit fields, because Prisma would otherwise pull both
+images into a list of pending cards.
 
 What another user ever sees of all this is one boolean on the report author.
 
@@ -356,6 +363,17 @@ dropped in the process, after orientation is applied.
 An 8 MB phone photo becomes roughly 150 KB, plus a 400 px thumbnail. Uploads go
 through a route handler rather than a server action because the browser needs
 progress events and only XHR reports them.
+
+**Where they land** depends on the host, and the `local` driver is the trap: it
+writes to the filesystem, which a serverless host does not have. On Vercel the
+application is bundled into a read-only `/var/task`, so every upload failed with
+`ENOENT: mkdir '/var/task/storage'` from inside a request — a stack trace naming
+the symptom and nothing else. `storage()` now refuses that combination at the
+boundary and says which of the two alternatives to pick, and `/api/health`
+reports it before anyone tries to upload. The alternatives are `blob` (Vercel
+Blob, which needs no second account) and `s3` (any S3-compatible bucket).
+
+Identity documents deliberately take none of this path; see §9a.
 
 ---
 
