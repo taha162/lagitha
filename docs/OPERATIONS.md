@@ -59,6 +59,7 @@ startup if it is missing or wrong. Before going live you must set:
 | `OTP_PROVIDER` | **not** `console` — startup refuses it in production, because that driver prints login codes to the log. Required for sign-up and password reset even though sign-in is a password. |
 | `STORAGE_DRIVER` | **not** `local` on a serverless host — the filesystem is read-only, and startup refuses it. `blob` on Vercel, or `s3` for any S3-compatible bucket. Also required for more than one app node. |
 | `NEXT_PUBLIC_SITE_URL` | used for canonical URLs, Open Graph and the sitemap |
+| `ADMIN_EMAILS` | the address of the first administrator — see [Getting into the console](#getting-into-the-console). Without it nobody can open `/admin` on a fresh database. |
 
 `OTP_DEV_FIXED_CODE` must be unset in production; startup refuses it.
 
@@ -172,13 +173,19 @@ selected driver has everything it needs.
 
 ### Reading /api/health
 
-Two rows are worth understanding before an incident, not during one.
+Three rows are worth understanding before an incident, not during one.
 
 **`deployment`** names the build that answered. Every Vercel deployment keeps
 its own permanent URL along with the environment variables it was created
 with, so re-reading an old deployment URL after changing a variable reports the
 old answer forever. Compare `deployment.id` against the newest deployment, or
 just use the project's production domain.
+
+**`adminAccess`** counts the active administrators and moderators. Zero
+administrators is reported as a failure, because it is one: nobody can review
+an identity card, so after the first few sign-ups nobody can publish either.
+The row names the next step — see
+[Getting into the console](#getting-into-the-console).
 
 **`schema`** compares the database against the columns *this build's code
 reads* — not merely "do any tables exist". A database that is a migration
@@ -221,6 +228,40 @@ own cache or a commercial provider, and keep the attribution.
 ---
 
 ## Routine work
+
+### Getting into the console
+
+The console lives at **`/admin`**, behind its own sign-in at **`/admin/login`**.
+There is no link to it from the members' site: a member who guesses the URL
+gets a 404, not a locked door, so the console's existence is not advertised.
+
+Getting the *first* administrator in is the one part that cannot happen inside
+the console, because every role change is an action a console user takes. On a
+fresh production database there is nobody to take it — the seed refuses to
+create accounts when `NODE_ENV=production`, which is what keeps demo passwords
+off a live site. So:
+
+1. Sign up on the members' site with the address that should own the platform,
+   exactly as any member would.
+2. Set `ADMIN_EMAILS` to that address where the site is hosted (on Vercel:
+   Settings → Environment Variables, scope **Production**), then redeploy so
+   the running server can read it.
+3. Sign out and sign in again. The sign-in promotes the account to `ADMIN` and
+   writes a `role.bootstrap` row to the audit log.
+4. Open `/admin`.
+
+It only ever promotes an account that already exists and has just proved it
+owns the address; it never creates one and never skips a password. Removing the
+address later does not demote anyone — an accidental edit to an environment
+variable must not lock the team out. Demote from `/admin/users`, which is the
+deliberate act.
+
+From then on, `/admin/users` promotes and demotes everyone else, and
+`ADMIN_EMAILS` can be left alone.
+
+If it does not work, read `checks.adminAccess` in [`/api/health`](#reading-apihealth):
+it says whether any administrator exists, whether `ADMIN_EMAILS` was read by
+the build that is actually serving, and which of the two is missing.
 
 ### Moderation queue
 

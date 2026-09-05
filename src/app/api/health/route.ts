@@ -55,6 +55,7 @@ export async function GET() {
     checks.database = { ok: false, detail: "skipped — no DATABASE_URL" };
     checks.schema = { ok: false, detail: "skipped — no DATABASE_URL" };
     checks.referenceData = { ok: false, detail: "skipped — no DATABASE_URL" };
+    checks.adminAccess = { ok: false, detail: "skipped — no DATABASE_URL" };
   } else {
     try {
       const { PrismaPg } = await import("@prisma/adapter-pg");
@@ -97,8 +98,15 @@ export async function GET() {
           } catch (error) {
             checks.referenceData = { ok: false, detail: describeError(error) };
           }
+
+          try {
+            checks.adminAccess = await describeAdminAccess(client);
+          } catch (error) {
+            checks.adminAccess = { ok: false, detail: describeError(error) };
+          }
         } else {
           checks.referenceData = { ok: false, detail: "skipped — no schema" };
+          checks.adminAccess = { ok: false, detail: "skipped — no schema" };
         }
       } finally {
         await client.$disconnect().catch(() => undefined);
@@ -107,6 +115,7 @@ export async function GET() {
       checks.database = { ok: false, detail: describeError(error) };
       checks.schema = { ok: false, detail: "skipped — database unreachable" };
       checks.referenceData = { ok: false, detail: "skipped — database unreachable" };
+      checks.adminAccess = { ok: false, detail: "skipped — database unreachable" };
     }
   }
 
@@ -279,6 +288,53 @@ async function describeSchema(client: PrismaClientLike): Promise<Check> {
       `BEHIND THE CODE — missing ${missing.map(([t, c]) => `${t}.${c}`).join(", ")}. ` +
       `Latest applied migration: ${applied ?? "unknown"}. ` +
       "Every page that reads these will throw. Run: npx prisma migrate deploy",
+  };
+}
+
+/**
+ * Can anybody actually open the console?
+ *
+ * A deployment with no administrator looks healthy and is not: identity
+ * verifications queue up with nobody to approve them, so no member can
+ * publish. It is also the state every new deployment starts in, because the
+ * seed refuses to create accounts in production — so the check says how to
+ * leave it. Counts only; no address is echoed back.
+ */
+async function describeAdminAccess(client: PrismaClientLike): Promise<Check> {
+  const rows = await client.$queryRaw<{ role: string; count: bigint }[]>`
+    SELECT role, COUNT(*) AS count
+    FROM users
+    WHERE role IN ('ADMIN', 'MODERATOR') AND status = 'ACTIVE'
+    GROUP BY role
+  `;
+
+  const count = (role: string) => Number(rows.find((row) => row.role === role)?.count ?? 0);
+  const admins = count("ADMIN");
+  const moderators = count("MODERATOR");
+
+  const listed = (process.env.ADMIN_EMAILS ?? process.env.ADMIN_EMAIL ?? "")
+    .split(/[,\s;]+/)
+    .filter((entry) => entry.includes("@")).length;
+
+  if (admins > 0) {
+    return {
+      ok: true,
+      detail:
+        `${admins} admin${admins === 1 ? "" : "s"}, ${moderators} moderator${moderators === 1 ? "" : "s"}` +
+        (listed > 0 ? ` (ADMIN_EMAILS lists ${listed})` : ""),
+    };
+  }
+
+  return {
+    ok: false,
+    detail:
+      listed > 0
+        ? `NO ADMIN ACCOUNT yet — ADMIN_EMAILS lists ${listed} address(es), but none has signed in ` +
+          "since it was set. Sign out and sign in again with that address; the account is promoted " +
+          "on sign-in. If it still says this, the address here does not match the account's exactly."
+        : "NO ADMIN ACCOUNT — nobody can open /admin, and identity verifications will never be " +
+          "reviewed. Set ADMIN_EMAILS to the address of an account that has already signed up, " +
+          "redeploy, then sign in again with it.",
   };
 }
 

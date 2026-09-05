@@ -85,6 +85,28 @@ function parseJsonRecord(name: string): Record<string, string> {
   }
 }
 
+/**
+ * The addresses that own this deployment.
+ *
+ * Somebody has to be the first administrator, and there is no honest way for
+ * the application to invent one: the seed refuses to create demo accounts in
+ * production, and a self-service "make me admin" button is not a thing that can
+ * exist. So the owner names themselves here, in the one place only the person
+ * holding the hosting account can write to. On their next sign-in the matching
+ * account is promoted — see `applyAdminBootstrap` in lib/auth.ts.
+ *
+ * Comma- or whitespace-separated; compared lowercased, because that is how
+ * addresses are stored.
+ */
+function adminEmails(): readonly string[] {
+  const raw = process.env.ADMIN_EMAILS ?? process.env.ADMIN_EMAIL;
+  if (!raw) return [];
+  return raw
+    .split(/[,\s;]+/)
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.includes("@"));
+}
+
 function integer(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -186,6 +208,9 @@ export const env = {
 
   aiProvider: optional("AI_PROVIDER", "none"),
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+
+  /** Accounts promoted to ADMIN on sign-in. Empty in a normal deployment. */
+  adminEmails: adminEmails(),
 
   siteUrl: optional("NEXT_PUBLIC_SITE_URL", "http://localhost:3000"),
   siteNoindex: optional("SITE_NOINDEX", "0") === "1",

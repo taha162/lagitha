@@ -213,7 +213,7 @@ function accountBlocked(user: Pick<User, "status" | "suspendedUntil">): boolean 
 
 /** Records the sign-in and lets a lapsed suspension clear itself. */
 async function markSignedIn(user: User): Promise<User> {
-  return prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id: user.id },
     data: {
       lastSeenAt: new Date(),
@@ -223,6 +223,51 @@ async function markSignedIn(user: User): Promise<User> {
         : {}),
     },
   });
+
+  return applyAdminBootstrap(updated);
+}
+
+/**
+ * The first administrator.
+ *
+ * Every other role change goes through the console, which needs an
+ * administrator to already exist — so on a fresh production database, where the
+ * seed refuses to create demo accounts, nobody can ever get in. This is the one
+ * door out of that circle: the owner writes their own address into ADMIN_EMAILS
+ * where they host the site, and their next sign-in promotes the account.
+ *
+ * Three things keep it from being a back door. It only ever touches an account
+ * that already exists and has just proved it owns the address — no account is
+ * created here, and no password is bypassed. It is writable only by whoever
+ * controls the deployment's environment, who could reach the database directly
+ * anyway. And it is written to the audit log, so a promotion is visible in the
+ * console rather than being a silent change of who can delete what.
+ *
+ * Removing an address does not demote anyone: that would make an accidental
+ * edit to an environment variable lock the whole team out. Demote from the
+ * console, which is the deliberate act.
+ */
+async function applyAdminBootstrap(user: User): Promise<User> {
+  if (user.role === "ADMIN") return user;
+  if (!user.email) return user;
+  if (!env.adminEmails.includes(user.email.toLowerCase())) return user;
+
+  const promoted = await prisma.user.update({
+    where: { id: user.id },
+    data: { role: "ADMIN" },
+  });
+
+  await prisma.adminAction.create({
+    data: {
+      actorId: user.id,
+      action: "role.bootstrap",
+      entityType: "user",
+      entityId: user.id,
+      metadata: { from: user.role, to: "ADMIN", source: "ADMIN_EMAILS" },
+    },
+  });
+
+  return promoted;
 }
 
 // ------------------------------------------------------------- sign-up -----
@@ -302,7 +347,7 @@ export async function completeSignup(
   const taken = await prisma.user.findUnique({ where: identifierWhere(identifier) });
   if (taken) return { ok: false, reason: "taken" };
 
-  const user = await prisma.user.create({
+  const created = await prisma.user.create({
     data: {
       ...identifierWhere(identifier),
       displayName,
@@ -310,6 +355,11 @@ export async function completeSignup(
       verifiedAt: new Date(),
     },
   });
+
+  // Also here, not only on sign-in: the owner of a fresh deployment may well
+  // set ADMIN_EMAILS before creating their account, and being told to sign out
+  // and back in to finish a sign-up would be a strange first impression.
+  const user = await applyAdminBootstrap(created);
 
   await createSession(user.id);
   return { ok: true, user };
