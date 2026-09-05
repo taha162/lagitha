@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { ar } from "@/i18n/ar";
 import {
+  changePassword,
   completePasswordReset,
   completeSignup,
   destroyAllSessions,
@@ -19,6 +20,7 @@ import { formatPhoneForDisplay } from "@/lib/phone";
 import { coarsenPoint, nearestArea } from "@/lib/geo";
 import { AvatarError, clearAvatar, setAvatar } from "@/lib/services/avatar";
 import {
+  changePasswordSchema,
   completePasswordResetSchema,
   completeProfileSchema,
   completeSignupSchema,
@@ -579,4 +581,36 @@ function safeRedirectTarget(value: string | null): string {
   if (!value) return "/";
   if (!value.startsWith("/") || value.startsWith("//")) return "/";
   return value;
+}
+
+export async function changePasswordAction(
+  _prev: unknown,
+  formData: FormData,
+): Promise<ActionResult> {
+  const user = await requireUser();
+
+  const parsed = changePasswordSchema.safeParse({
+    currentPassword: formData.get("currentPassword") ?? "",
+    password: formData.get("password"),
+    passwordConfirm: formData.get("passwordConfirm"),
+  });
+
+  if (!parsed.success) {
+    const errors = fieldErrors(parsed.error);
+    const field = ["password", "passwordConfirm"].find((name) => errors[name]) ?? "password";
+    return { ok: false, error: errors[field] ?? ar.errors.validation, field };
+  }
+
+  const result = await changePassword(
+    user.id,
+    parsed.data.currentPassword,
+    parsed.data.password,
+  );
+
+  if (!result.ok) {
+    return { ok: false, error: ar.account.passwordWrong, field: "currentPassword" };
+  }
+
+  revalidatePath("/me/account");
+  return { ok: true };
 }

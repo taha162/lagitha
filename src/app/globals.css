@@ -42,6 +42,9 @@
 
   --color-focus: #176b63;
 
+  /* One easing curve for everything that moves: fast out, settled arrival. */
+  --ease-emphasis: cubic-bezier(0.22, 1, 0.36, 1);
+
   /* -- typography ------------------------------------------------------ */
   --font-sans: var(--font-arabic), "Segoe UI", system-ui, sans-serif;
   --font-latin: var(--font-latin), ui-sans-serif, system-ui, sans-serif;
@@ -202,6 +205,57 @@
     }
     100% {
       background-position: 0 50%;
+    }
+  }
+
+  /* ---------------------------------------------------------------- motion
+   * Three jobs, in order of how much they matter on a phone:
+   *
+   *   1. `.press`  — say the tap registered. `hover:` does not fire on touch,
+   *                  so without this a button is inert until the server
+   *                  answers, which on a slow connection is a second or more
+   *                  of nothing. This is the whole difference between an
+   *                  interface that feels alive and one that feels broken.
+   *   2. `.rise`   — content arrives rather than appearing. Staggered by
+   *                  `--i` so a list reads top to bottom.
+   *   3. `.lift`   — a card acknowledges a press by dropping slightly, the
+   *                  way a physical button does.
+   *
+   * All three are disabled by the reduced-motion block above, which leaves
+   * the interface fully usable — nothing here carries meaning on its own.
+   */
+  .press,
+  .lift {
+    transition:
+      transform 120ms var(--ease-emphasis),
+      background-color 150ms ease-out,
+      border-color 150ms ease-out,
+      box-shadow 150ms ease-out;
+    /* Android paints its own grey box otherwise, which fights our feedback. */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .press:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  .lift:active {
+    transform: scale(0.99) translateY(1px);
+  }
+
+  .rise {
+    animation: lg-rise 260ms var(--ease-emphasis) both;
+    animation-delay: calc(var(--i, 0) * 40ms);
+  }
+
+  @keyframes lg-rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
     }
   }
 
