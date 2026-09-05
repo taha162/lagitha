@@ -219,6 +219,20 @@ Identity cards need none of this. They are stored in Postgres and never become
 objects, so a deployment with no bucket at all can still verify members and
 publish reports — only photos are unavailable.
 
+**When someone reports an error attaching a photo**, the log says which of the
+two things went wrong, and they are not the same problem:
+
+- `[LAGAITHA] image upload failed at the storage layer:` — the photo was fine
+  and there was nowhere to put it. The line that follows names the fix
+  (`STORAGE_DRIVER=local` on a read-only host, a missing
+  `BLOB_READ_WRITE_TOKEN`). The member is told it is our fault and that they can
+  publish without a photo, because they can — only a title and a rough location
+  are required.
+- `[LAGAITHA] could not decode an uploaded image:` — the bytes did not make an
+  image this build can read. A repeated run of these on HEIC files means the
+  deployed `sharp` was built without libheif, and iPhone photos will keep
+  failing until that is fixed; anything else is usually one truncated upload.
+
 ### Map tiles
 
 The default tile URL points at `tile.openstreetmap.org`, whose usage policy is
@@ -262,6 +276,20 @@ From then on, `/admin/users` promotes and demotes everyone else, and
 If it does not work, read `checks.adminAccess` in [`/api/health`](#reading-apihealth):
 it says whether any administrator exists, whether `ADMIN_EMAILS` was read by
 the build that is actually serving, and which of the two is missing.
+
+### Running the console from a phone
+
+The console is designed desktop-first — a moderator works through queues, and a
+wide table is the right shape for that. It is not desktop-only. Below `lg`
+every queue re-lays itself as one card per row, each value labelled with its
+column name and the row's actions at the bottom of the card where a thumb can
+reach them.
+
+That is not a nicety. As a table, the actions column sat some six hundred
+pixels off the side of a 390px screen, inside a horizontal scroller nothing
+hinted at: tapping a row's buttons was impossible, which from the outside looks
+exactly like buttons that do nothing. If you change a console page, check it at
+390px — no page may scroll sideways, and no control may sit outside the screen.
 
 ### Moderation queue
 

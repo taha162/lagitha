@@ -279,14 +279,11 @@ export default async function ReportPage({
             </p>
           )}
 
-          {canModerate(viewer) && (
-            <Link
-              href={`/admin/reports?ref=${report.reference}`}
-              className="inline-block text-fine text-primary hover:text-primary-hover"
-            >
-              {ar.admin.title} ←
-            </Link>
-          )}
+          {/* No link to the console from here, deliberately. The two sites are
+              separate: staff reach a report through /admin/reports, where the
+              reference is searchable. A shortcut on the public page is the one
+              thread that joins them, and a member who sees a moderator's screen
+              over their shoulder should not learn the console exists. */}
         </footer>
       </article>
     </AppShell>

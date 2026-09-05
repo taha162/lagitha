@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -100,6 +100,21 @@ export function Metric({
   );
 }
 
+/**
+ * A dense table on a desktop; a stack of cards on a phone.
+ *
+ * The console is desktop-first by design, but the person who owns a site may
+ * only have a phone — and a ten-column table on a 390px screen puts the row's
+ * action buttons some six hundred pixels off the edge, inside a horizontal
+ * scroller nothing hints at. The buttons were not broken; they were
+ * unreachable, which to the person tapping is the same thing.
+ *
+ * Below `lg` the CSS in globals.css re-lays the same markup as cards. For that
+ * to read, every cell needs its column name, so each `<td>` is cloned here with
+ * a `data-label` — the pages keep writing ordinary table rows and get the
+ * mobile layout for free. Cells are matched to headers by position, counting
+ * only real elements, which is exactly the order they appear in the DOM.
+ */
 export function DataTable({
   headers,
   children,
@@ -110,13 +125,13 @@ export function DataTable({
   empty?: string;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-meta border-collapse">
+    <div className="lg:overflow-x-auto">
+      <table className="lg-data-table w-full text-meta border-collapse">
         <thead>
           <tr className="border-b border-border">
-            {headers.map((header) => (
+            {headers.map((header, index) => (
               <th
-                key={header}
+                key={`${header}-${index}`}
                 scope="col"
                 className="px-3 py-2 text-start text-fine font-medium text-muted whitespace-nowrap"
               >
@@ -125,12 +140,37 @@ export function DataTable({
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-border">{children}</tbody>
+        <tbody className="divide-y divide-border">{labelCells(children, headers)}</tbody>
       </table>
 
       {empty && <p className="px-4 py-8 text-center text-meta text-muted">{empty}</p>}
     </div>
   );
+}
+
+type CellProps = { "data-label"?: string };
+
+/** Copies each header onto the cell under it, so a card can name its values. */
+function labelCells(rows: ReactNode, headers: string[]): ReactNode {
+  return Children.map(rows, (row) => {
+    if (!isValidElement<{ children?: ReactNode }>(row)) return row;
+
+    let column = 0;
+    const cells = Children.map(row.props.children, (cell) => {
+      if (!isValidElement<CellProps>(cell)) return cell;
+
+      const header = headers[column];
+      column += 1;
+
+      // An already-labelled cell, or a column with no heading (the actions
+      // column), is left alone — a card should not print an empty caption.
+      if (cell.props["data-label"] !== undefined || !header) return cell;
+
+      return cloneElement(cell as ReactElement<CellProps>, { "data-label": header });
+    });
+
+    return cloneElement(row as ReactElement<{ children?: ReactNode }>, undefined, cells);
+  });
 }
 
 /** Horizontal bar chart. Reads exactly as well without the bars. */

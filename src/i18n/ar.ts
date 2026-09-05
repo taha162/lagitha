@@ -557,6 +557,9 @@ export const ar = {
     rateLimited: (s: number) => `حاول مرة ثانية بعد ${s} ثانية.`,
     reportLimit: "وصلت الحد اليومي للبلاغات. إذا تحتاج أكثر، راسلنا.",
     uploadFailed: "حدث خطأ أثناء رفع الصورة.",
+    // Says whose fault it is. A configuration problem on our side used to read
+    // as "your image failed", so people retried the same good photo.
+    uploadStorage: "خلل عندنا بحفظ الصور، مو بصورتك. تگدر تنشر البلاغ بدون صورة، أو تجرب بعد شوي.",
     uploadTooLarge: "الصورة كبيرة. الحد الأقصى ٨ ميغابايت.",
     uploadBadType: "نوع الملف غير مدعوم. استخدم JPG أو PNG أو WebP.",
     imageBroken: "ما قدرنا نقرأ الصورة. جرّب صورة ثانية.",

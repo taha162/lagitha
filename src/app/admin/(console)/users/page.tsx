@@ -7,6 +7,7 @@ import { formatDate, relativeTime } from "@/lib/time";
 import { PageHeader, Panel, DataTable } from "@/components/admin/panel";
 import { Badge } from "@/components/ui/badge";
 import { UserActions } from "./user-actions";
+import { UserSearch } from "./user-search";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: ar.admin.nav.users };
@@ -27,10 +28,15 @@ export default async function AdminUsersPage({
   const canAct = isAdmin(viewer);
 
   const users = await prisma.user.findMany({
+    // The identifier column is masked, so an address typed from a support
+    // message is the only handle staff have on a person. Searching it was
+    // left out when the platform moved from phone numbers to email, which made
+    // every account unfindable by the one thing anyone knows about it.
     where: q
       ? {
           OR: [
             { displayName: { contains: q, mode: "insensitive" } },
+            { email: { contains: q, mode: "insensitive" } },
             { phone: { contains: q } },
           ],
         }
@@ -49,6 +55,7 @@ export default async function AdminUsersPage({
         description={
           canAct ? undefined : "الإجراءات على الحسابات متاحة للمدراء فقط."
         }
+        actions={<UserSearch current={q ?? ""} />}
       />
 
       <Panel>
@@ -63,7 +70,13 @@ export default async function AdminUsersPage({
             "آخر ظهور",
             "",
           ]}
-          empty={users.length === 0 ? "ما في مستخدمين." : undefined}
+          empty={
+            users.length === 0
+              ? q
+                ? `ما لگينا حساباً يطابق «${q}».`
+                : "ما في مستخدمين."
+              : undefined
+          }
         >
           {users.map((user) => (
             <tr key={user.id} className="hover:bg-surface-sunken/50">

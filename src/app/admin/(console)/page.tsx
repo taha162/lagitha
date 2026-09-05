@@ -94,7 +94,7 @@ export default async function AdminDashboard() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel title={ar.admin.dashboard.attention} className="lg:col-span-2">
+        <Panel title={ar.admin.dashboard.attention} className="min-w-0 lg:col-span-2">
           {attentionCount === 0 ? (
             <p className="flex items-center justify-center gap-2 px-4 py-10 text-meta text-muted">
               <CheckCircle2 className="size-4 text-success" aria-hidden strokeWidth={1.75} />
@@ -103,7 +103,7 @@ export default async function AdminDashboard() {
           ) : (
             <ul className="divide-y divide-border">
               {queue.flagged.map((flag) => (
-                <li key={flag.id} className="flex items-center gap-3 px-4 py-2.5">
+                <li key={flag.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
                   <Badge tone="danger">{ar.flag.reasons[flag.reason]}</Badge>
                   <Link
                     href={`/admin/reports?ref=${flag.report?.reference ?? ""}`}
@@ -118,7 +118,7 @@ export default async function AdminDashboard() {
               ))}
 
               {queue.underReview.map((report) => (
-                <li key={report.id} className="flex items-center gap-3 px-4 py-2.5">
+                <li key={report.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
                   <Badge tone="warning">{ar.admin.actions.review}</Badge>
                   <Link
                     href={`/admin/reports?ref=${report.reference}`}
@@ -133,7 +133,7 @@ export default async function AdminDashboard() {
               ))}
 
               {queue.staleVerifications.map((request) => (
-                <li key={request.id} className="flex items-center gap-3 px-4 py-2.5">
+                <li key={request.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
                   <Badge tone="primary">{ar.admin.nav.verifications}</Badge>
                   <Link
                     href="/admin/verifications"
@@ -151,6 +151,7 @@ export default async function AdminDashboard() {
         </Panel>
 
         <Panel
+          className="min-w-0"
           title={ar.admin.dashboard.recentReports}
           action={
             <Link href="/admin/reports" className="text-fine text-primary hover:text-primary-hover">
@@ -191,6 +192,7 @@ export default async function AdminDashboard() {
         </Panel>
 
         <Panel
+          className="min-w-0"
           title={ar.admin.dashboard.recentMatches}
           action={
             <Link href="/admin/matches" className="text-fine text-primary hover:text-primary-hover">
