@@ -155,6 +155,22 @@ export const completePasswordResetSchema = z
 export const completeProfileSchema = z.object({ displayName: displayNameSchema });
 
 /**
+ * Changing a password from inside the account. `currentPassword` is not
+ * strength-checked — it is being compared, not chosen — and is allowed to be
+ * empty for an account that has no password yet.
+ */
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().max(PASSWORD_MAX_LENGTH),
+    password: passwordSchema,
+    passwordConfirm: z.string(),
+  })
+  .refine((value) => value.password === value.passwordConfirm, {
+    message: ar.errors.passwordMismatch,
+    path: ["passwordConfirm"],
+  });
+
+/**
  * The last sign-up screen: a photo and roughly where the person is. Both are
  * optional — neither is needed to file a report, and a blocked "finish" button
  * over a profile picture would be an odd place to lose someone.
@@ -357,6 +373,21 @@ export const adminCategorySchema = z.object({
   reportId: z.string().trim().min(1),
   categorySlug: z.string().trim().min(1),
   reason: z.string().trim().max(300).optional(),
+});
+
+/**
+ * Deletion is spelled out separately from the moderation actions, and requires
+ * the reference or display name typed back. Hiding is reversible; this is not,
+ * and a mis-click in a dense table should not be able to reach it.
+ */
+export const adminDeleteSchema = z.object({
+  id: z.string().trim().min(1),
+  confirm: z.string().trim().min(1),
+  reason: z
+    .string()
+    .trim()
+    .min(4, ar.admin.actions.reasonRequired)
+    .max(300, ar.errors.tooLong(300)),
 });
 
 export const adminUserActionSchema = z.object({

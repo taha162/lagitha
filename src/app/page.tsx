@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import { Search, PackageSearch, HandHeart, ShieldCheck } from "lucide-react";
 import { ar } from "@/i18n/ar";
@@ -86,8 +87,13 @@ export default async function HomePage() {
       <NearbyReports fallbackTitle={ar.home.latestTitle}>
         {publicReports.length > 0 ? (
           <div className="grid gap-2.5 sm:grid-cols-2">
-            {publicReports.map((report) => (
-              <ReportCard key={report.id} report={report} />
+            {publicReports.map((report, index) => (
+              <ReportCard
+                key={report.id}
+                report={report}
+                className="rise"
+                style={{ "--i": index } as CSSProperties}
+              />
             ))}
           </div>
         ) : (

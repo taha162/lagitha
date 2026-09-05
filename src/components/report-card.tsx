@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import { MapPin, Clock, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -16,11 +17,14 @@ export function ReportCard({
   report,
   distanceLabel,
   className,
+  style,
   showType = true,
 }: {
   report: PublicReport;
   distanceLabel?: string;
   className?: string;
+  /** Carries the `--i` stagger index for list entrances. */
+  style?: CSSProperties;
   showType?: boolean;
 }) {
   const thumb = report.images[0];
@@ -29,9 +33,12 @@ export function ReportCard({
 
   return (
     <article
+      style={style}
       className={cn(
         "group relative flex gap-3 p-3 bg-surface border border-border rounded-md",
-        "transition-colors hover:border-border-strong focus-within:border-primary",
+        // The whole card is the tap target (the title's ::after covers it), so
+        // the whole card is what responds to the press.
+        "lift hover:border-border-strong focus-within:border-primary",
         className,
       )}
     >

@@ -49,7 +49,9 @@ export function Button({
       {...(asChild ? {} : { type: type ?? "button" })}
       className={cn(
         "inline-flex items-center justify-center font-medium select-none",
-        "transition-colors duration-150",
+        // `press` carries the transition; see globals.css. Hover never fires
+        // on touch, so the active state is the only feedback most users get.
+        "press",
         "disabled:opacity-55 disabled:pointer-events-none",
         VARIANTS[variant],
         SIZES[size],

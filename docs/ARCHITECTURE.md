@@ -287,6 +287,27 @@ wanted anyway — which is most of what that library would have brought.
 
 ---
 
+## 8a. The console is a separate product
+
+`/admin` shares a deployment with the member site and nothing else. Nothing on
+the member side links to it, it has its own sign-in at `/admin/login`, and the
+guard lives in an `(console)` route group so that sign-in page is reachable
+without already being past the guard.
+
+The two refusals differ deliberately. No session redirects to the console's
+sign-in, because staff arrive from a bookmark. A signed-in member who is not
+staff gets a plain **404**: "forbidden" would confirm there is something there,
+and they have no reason to learn that.
+
+Deletion lives here and only here. Every other staff action is reversible —
+hide, unhide, suspend, reopen — so deleting a report or an account is
+admin-only, requires the reference or the account name typed back, requires a
+written reason, and says on the dialog that hiding is usually enough. `Recovery`
+rows survive both deletions by design (§2), so a takedown cannot quietly
+rewrite the impact statistics.
+
+---
+
 ## 9a. Identity verification
 
 Publishing a report requires a national ID card (البطاقة الموحدة) behind the
@@ -374,6 +395,33 @@ reports it before anyone tries to upload. The alternatives are `blob` (Vercel
 Blob, which needs no second account) and `s3` (any S3-compatible bucket).
 
 Identity documents deliberately take none of this path; see §9a.
+
+---
+
+## 11a. Motion, and why there is any
+
+The interface was reported as feeling رigid — "جامد". The cause was not a
+shortage of animation; it was that **`hover:` does not fire on a touch screen**.
+Every button styled only for hover was inert from the moment it was tapped
+until the server answered, which on the connections this product is used on is
+a second or more of a screen that looks broken.
+
+So the motion here does three jobs and no others, defined once in
+`globals.css`:
+
+| utility | job |
+|---|---|
+| `.press` | the tap registered — a 3% scale on `:active`, plus killing the Android tap highlight that would otherwise fight it |
+| `.rise` | content arrived rather than appeared, staggered 40 ms per item via `--i` so a list reads top to bottom |
+| `.lift` | a card acknowledges a press the way a physical button does |
+
+Route-level `loading.tsx` skeletons matter for the same reason: a navigation
+without one is the previous screen sitting there, indistinguishable from a
+frozen app.
+
+All of it sits under the existing `prefers-reduced-motion` block, which is
+what makes it safe — nothing here carries meaning, so removing it leaves the
+product fully usable rather than ambiguous.
 
 ---
 

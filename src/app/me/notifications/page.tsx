@@ -9,6 +9,7 @@ import { relativeTime } from "@/lib/time";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState } from "@/components/ui/states";
 import { MarkAllReadButton } from "./mark-all-read";
+import { MarkReadOnView } from "./mark-read-on-view";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
@@ -32,6 +33,9 @@ export default async function NotificationsPage() {
       unreadMessages={messages}
       width="narrow"
     >
+      {/* Opening the page is what clears the badge; see MarkReadOnView. */}
+      <MarkReadOnView unread={unread} />
+
       <div className="flex items-center justify-between gap-3 mb-4">
         <h1 className="text-h1 text-text-strong">{ar.notifications.title}</h1>
         {unread > 0 && <MarkAllReadButton />}

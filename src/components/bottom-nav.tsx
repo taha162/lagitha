@@ -46,7 +46,7 @@ export function BottomNav({ unreadCount = 0 }: { unreadCount?: number }) {
                 <Link
                   href={item.href}
                   aria-label={item.label}
-                  className="grid place-items-center size-12 -mt-4 rounded-full bg-primary text-primary-contrast shadow-raised border-4 border-background"
+                  className="press grid place-items-center size-12 -mt-4 rounded-full bg-primary text-primary-contrast shadow-raised border-4 border-background active:brightness-95"
                 >
                   <Icon className="size-6" strokeWidth={2} aria-hidden />
                 </Link>
@@ -60,15 +60,29 @@ export function BottomNav({ unreadCount = 0 }: { unreadCount?: number }) {
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "relative flex flex-col items-center justify-center gap-0.5 h-14 text-[11px]",
+                  "press relative flex flex-col items-center justify-center gap-0.5 h-14 text-[11px]",
                   active ? "text-primary" : "text-muted",
                 )}
               >
-                <Icon className="size-5" strokeWidth={active ? 2 : 1.75} aria-hidden />
+                {/* The current tab is marked by a rule that slides in, so
+                    changing tabs reads as movement rather than a repaint. */}
+                <span
+                  aria-hidden
+                  className={cn(
+                    "absolute top-0 h-0.5 rounded-full bg-primary transition-all duration-200",
+                    active ? "w-8 opacity-100" : "w-0 opacity-0",
+                  )}
+                  style={{ transitionTimingFunction: "var(--ease-emphasis)" }}
+                />
+                <Icon
+                  className={cn("size-5 transition-transform duration-200", active && "-translate-y-px")}
+                  strokeWidth={active ? 2 : 1.75}
+                  aria-hidden
+                />
                 <span>{item.label}</span>
                 {showBadge && (
                   <span
-                    className="absolute top-1.5 start-1/2 translate-x-3 size-2 rounded-full bg-primary"
+                    className="absolute top-1.5 start-1/2 translate-x-3 size-2 rounded-full bg-primary animate-pulse"
                     aria-hidden
                   />
                 )}

@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { SearchX } from "lucide-react";
@@ -78,8 +79,14 @@ export default async function SearchPage({
       {publicReports.length > 0 ? (
         <>
           <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-            {publicReports.map((report) => (
-              <ReportCard key={report.id} report={report} />
+            {publicReports.map((report, index) => (
+              <ReportCard
+                key={report.id}
+                report={report}
+                // Results arrive in order rather than all at once; see `.rise`.
+                className="rise"
+                style={{ "--i": index } as CSSProperties}
+              />
             ))}
           </div>
 

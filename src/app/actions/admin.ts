@@ -11,8 +11,12 @@ import {
 } from "@/lib/authz";
 import { refreshSearchText } from "@/lib/services/reports";
 import { notify } from "@/lib/services/notifications";
+import { getCurrentUser } from "@/lib/auth";
+import { isStaff } from "@/lib/authz";
+import { signInAction } from "./auth";
 import {
   adminCategorySchema,
+  adminDeleteSchema,
   adminDuplicateActionSchema,
   adminFlagActionSchema,
   adminMatchActionSchema,
@@ -412,4 +416,204 @@ function revalidateAdmin(reference: string): void {
   revalidatePath("/admin/audit");
   revalidatePath(`/r/${reference}`);
   revalidatePath("/search");
+}
+
+// ------------------------------------------------------------- sign-in -----
+
+/**
+ * The console's own sign-in.
+ *
+ * Separate from `signInAction` for one reason: it tells a member who has no
+ * console access that they have none, instead of signing them in and leaving
+ * them at a 404. They stay signed in — the account is fine, it simply is not a
+ * staff account — and the message points them back at the member site.
+ */
+export async function adminSignInAction(
+  _prev: unknown,
+  formData: FormData,
+): Promise<ActionResult> {
+  const result = await signInAction(_prev, formData);
+  if (!result.ok) return result;
+
+  const user = await getCurrentUser();
+  if (!user || !isStaff(user)) {
+    return { ok: false, error: ar.admin.notStaff };
+  }
+
+  return { ok: true };
+}
+
+// -------------------------------------------------------------- deletion ---
+
+/**
+ * Deletes a report and everything that only existed because of it.
+ *
+ * Hiding is the usual answer and is reversible; this is not, which is why it
+ * is admin-only, needs the reference typed back, and needs a written reason.
+ *
+ * `Recovery` rows are deliberately not deleted: the schema sets their report
+ * reference to null instead, so the evidence that something was returned
+ * survives while carrying no personal data. That is what keeps the impact
+ * statistics honest after a takedown.
+ */
+export async function deleteReportAction(input: unknown): Promise<ActionResult> {
+  const admin = await requireAdmin();
+
+  const parsed = adminDeleteSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? ar.errors.validation,
+      field: "reason",
+    };
+  }
+
+  const report = await prisma.report.findUnique({
+    where: { id: parsed.data.id },
+    select: {
+      id: true,
+      reference: true,
+      title: true,
+      userId: true,
+      images: { select: { storageKey: true, thumbKey: true } },
+    },
+  });
+  if (!report) return { ok: false, error: ar.errors.reportNotFound };
+
+  if (parsed.data.confirm !== report.reference) {
+    return {
+      ok: false,
+      error: ar.admin.actions.deleteTypeToConfirm(report.reference),
+      field: "confirm",
+    };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Written before the delete, and it outlives the row it describes: the
+    // reference is the only trace left of what was removed.
+    await tx.adminAction.create({
+      data: {
+        actorId: admin.id,
+        action: "report.delete",
+        entityType: "Report",
+        entityId: report.id,
+        metadata: {
+          reference: report.reference,
+          title: report.title,
+          authorId: report.userId,
+          reason: parsed.data.reason,
+        } as never,
+      },
+    });
+
+    await tx.report.delete({ where: { id: report.id } });
+  });
+
+  await removeStoredImages(report.images);
+
+  revalidateAdmin(report.reference);
+  revalidatePath("/");
+  revalidatePath("/search");
+  return { ok: true };
+}
+
+/**
+ * Deletes an account and its content.
+ *
+ * Banning is the usual answer — it stops the person and keeps the record. This
+ * exists for the case where the content itself has to go.
+ *
+ * Two accounts cannot be deleted: your own, and another admin's. Demote first,
+ * so that removing an administrator is always two deliberate steps by someone
+ * who is still accountable for both.
+ */
+export async function deleteUserAction(input: unknown): Promise<ActionResult> {
+  const admin = await requireAdmin();
+
+  const parsed = adminDeleteSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? ar.errors.validation,
+      field: "reason",
+    };
+  }
+
+  const target = await prisma.user.findUnique({
+    where: { id: parsed.data.id },
+    select: {
+      id: true,
+      displayName: true,
+      role: true,
+      avatarKey: true,
+      avatarThumbKey: true,
+      reports: { select: { images: { select: { storageKey: true, thumbKey: true } } } },
+    },
+  });
+  if (!target) return { ok: false, error: "ما لگينا المستخدم." };
+
+  if (target.id === admin.id) {
+    return { ok: false, error: "ما تگدر تحذف حسابك من هنا." };
+  }
+  if (target.role === "ADMIN") {
+    return { ok: false, error: "نزّل صلاحية المدير أول، بعدين احذف الحساب." };
+  }
+  if (parsed.data.confirm !== target.displayName) {
+    return {
+      ok: false,
+      error: ar.admin.actions.deleteTypeToConfirm(target.displayName),
+      field: "confirm",
+    };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.adminAction.create({
+      data: {
+        actorId: admin.id,
+        action: "user.delete",
+        entityType: "User",
+        entityId: target.id,
+        metadata: { displayName: target.displayName, reason: parsed.data.reason } as never,
+      },
+    });
+
+    await tx.user.delete({ where: { id: target.id } });
+  });
+
+  await removeStoredImages([
+    { storageKey: target.avatarKey, thumbKey: target.avatarThumbKey },
+    ...target.reports.flatMap((report) => report.images),
+  ]);
+
+  revalidatePath("/admin/users");
+  revalidatePath("/admin/audit");
+  revalidatePath("/");
+  revalidatePath("/search");
+  return { ok: true };
+}
+
+/**
+ * Best-effort cleanup of the objects a deleted row pointed at.
+ *
+ * Deliberately outside the transaction and deliberately forgiving: object
+ * storage is a second system, and a bucket being slow or misconfigured must
+ * not resurrect a record an administrator deleted. An orphaned image costs
+ * storage; a failed deletion costs trust.
+ */
+async function removeStoredImages(
+  images: { storageKey: string | null; thumbKey: string | null }[],
+): Promise<void> {
+  const keys = images
+    .flatMap((image) => [image.storageKey, image.thumbKey])
+    .filter((key): key is string => Boolean(key));
+
+  if (keys.length === 0) return;
+
+  try {
+    const { storage } = await import("@/lib/providers/storage");
+    const store = await storage();
+    await Promise.all(keys.map((key) => store.delete(key).catch(() => undefined)));
+  } catch (error) {
+    console.error("[LAGAITHA] could not remove stored images after a delete", error);
+  }
 }
