@@ -359,6 +359,21 @@ export const adminCategorySchema = z.object({
   reason: z.string().trim().max(300).optional(),
 });
 
+/**
+ * Deletion is spelled out separately from the moderation actions, and requires
+ * the reference or display name typed back. Hiding is reversible; this is not,
+ * and a mis-click in a dense table should not be able to reach it.
+ */
+export const adminDeleteSchema = z.object({
+  id: z.string().trim().min(1),
+  confirm: z.string().trim().min(1),
+  reason: z
+    .string()
+    .trim()
+    .min(4, ar.admin.actions.reasonRequired)
+    .max(300, ar.errors.tooLong(300)),
+});
+
 export const adminUserActionSchema = z.object({
   userId: z.string().trim().min(1),
   action: z.enum(["suspend", "unsuspend", "ban", "promote-moderator", "demote"]),

@@ -9,11 +9,13 @@ import { formatDateTime } from "@/lib/time";
 import { Sheet } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Badge, ReportTypeBadge } from "@/components/ui/badge";
+import { DeleteDialog } from "@/components/admin/delete-dialog";
 import { TextField } from "@/components/ui/field";
 import { useToast } from "@/components/ui/toast";
 import {
   changeReportCategoryAction,
   rematchReportAction,
+  deleteReportAction,
   reportActionAction,
 } from "@/app/actions/admin";
 
@@ -50,9 +52,12 @@ export interface AdminReportView {
 export function ReportDrawer({
   report,
   categories,
+  canDelete,
 }: {
   report: AdminReportView;
   categories: { slug: string; nameAr: string }[];
+  /** Deleting is admin-only; a moderator hides. */
+  canDelete: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -237,6 +242,23 @@ export function ReportDrawer({
               {ar.admin.nav.matches}
             </Button>
           </div>
+
+          {/* Separated from the reversible actions above by a rule, because it
+              is the only one of them that cannot be undone. */}
+          {canDelete && (
+            <div className="pt-3 border-t border-border">
+              <DeleteDialog
+                label={ar.admin.actions.deleteReport}
+                title={ar.admin.actions.deleteReport}
+                body={ar.admin.actions.deleteReportConfirm}
+                confirmWord={report.reference}
+                onDelete={({ confirm, reason }) =>
+                  deleteReportAction({ id: report.id, confirm, reason })
+                }
+                onDeleted={close}
+              />
+            </div>
+          )}
         </div>
       </div>
     </Sheet>

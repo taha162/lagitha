@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { TextField } from "@/components/ui/field";
 import { useToast } from "@/components/ui/toast";
-import { userActionAction } from "@/app/actions/admin";
+import { deleteUserAction, userActionAction } from "@/app/actions/admin";
+import { DeleteDialog } from "@/components/admin/delete-dialog";
 
 /**
  * Account-level actions.
@@ -82,6 +83,31 @@ export function UserActions({
             {ar.admin.actions.demote}
           </Button>
         ) : null}
+
+        {status !== "BANNED" && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-danger hover:bg-danger-soft"
+            onClick={() => setPendingAction("ban")}
+          >
+            {ar.admin.actions.banUser}
+          </Button>
+        )}
+
+        {/* Banning keeps the record and stops the person; this is for when the
+            content itself has to go, so it sits behind its own confirmation. */}
+        {role !== "ADMIN" && (
+          <DeleteDialog
+            label={ar.admin.actions.delete}
+            title={ar.admin.actions.deleteUser}
+            body={ar.admin.actions.deleteUserConfirm}
+            confirmWord={displayName}
+            onDelete={({ confirm, reason }) =>
+              deleteUserAction({ id: userId, confirm, reason })
+            }
+          />
+        )}
       </div>
 
       <Sheet

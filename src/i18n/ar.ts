@@ -588,6 +588,12 @@ export const ar = {
 
   admin: {
     title: "لوحة العمليات",
+    signInTitle: "دخول الطاقم",
+    signInSubtitle: "هذه اللوحة للطاقم فقط. لو وصلتها بالغلط، ارجع للموقع.",
+    signInButton: "دخول",
+    notStaff: "هذا الحساب ما عنده صلاحية لوحة الإدارة.",
+    backToSite: "الرجوع لموقع لَگيتها",
+    signedInAs: "داخل باسم",
     nav: {
       dashboard: "لوحة المتابعة",
       reports: "البلاغات",
@@ -644,6 +650,7 @@ export const ar = {
       markRecovered: "تعليم كمسترد",
       mergeDuplicate: "دمج كتكرار",
       suspendUser: "إيقاف المستخدم",
+      banUser: "حظر نهائي",
       unsuspendUser: "رفع الإيقاف",
       makeModerator: "ترقية لمشرف",
       demote: "إرجاع لعضو",
@@ -654,6 +661,16 @@ export const ar = {
       reasonLabel: "سبب الإجراء",
       reasonRequired: "اكتب سبباً — يُحفظ في سجل الإجراءات.",
       done: "تم تنفيذ الإجراء.",
+      delete: "حذف نهائي",
+      deleteReport: "حذف البلاغ نهائياً",
+      deleteUser: "حذف الحساب نهائياً",
+      deleteReportConfirm:
+        "سيُحذف البلاغ وصوره ورسائله وطلبات إثبات الملكية عليه، بلا رجعة. سجل الاسترداد يبقى بدون بيانات شخصية.",
+      deleteUserConfirm:
+        "سيُحذف الحساب وكل بلاغاته ورسائله وجلساته، بلا رجعة. سجلات الاسترداد تبقى بدون بيانات شخصية.",
+      deleteTypeToConfirm: (word: string) => `اكتب «${word}» للتأكيد`,
+      deleted: "تم الحذف نهائياً.",
+      preferHide: "الإخفاء يكفي بالعادة. الحذف ما يرجع.",
     },
     duplicates: {
       title: "بلاغات قد تكون مكررة",

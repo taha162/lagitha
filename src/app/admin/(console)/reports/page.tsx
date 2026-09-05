@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ar } from "@/i18n/ar";
 import { prisma } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth";
+import { isAdmin } from "@/lib/authz";
 import { adminReports, ADMIN_PAGE_SIZE } from "@/lib/services/admin";
 import { relativeTime } from "@/lib/time";
 import { maskIdentifier } from "@/lib/privacy";
@@ -51,6 +53,8 @@ export default async function AdminReportsPage({
     status: asEnum(single("status"), ["ACTIVE", "RECOVERED", "CLOSED"] as const),
     page: Number.parseInt(single("page") ?? "1", 10) || 1,
   };
+
+  const canDelete = isAdmin(await getCurrentUser());
 
   const [{ reports, total, page }, categories] = await Promise.all([
     adminReports(filters),
@@ -217,6 +221,7 @@ export default async function AdminReportsPage({
             hasSecret: Boolean(selected.verificationSecret),
           }}
           categories={categories}
+          canDelete={canDelete}
         />
       )}
     </>

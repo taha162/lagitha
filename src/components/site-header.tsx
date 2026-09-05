@@ -1,8 +1,7 @@
 import Link from "next/link";
-import { Bell, MessageSquare, Search, User as UserIcon, Shield } from "lucide-react";
+import { Bell, MessageSquare, Search, User as UserIcon } from "lucide-react";
 import type { User } from "@/generated/prisma/client";
 import { ar } from "@/i18n/ar";
-import { isStaff } from "@/lib/authz";
 import { BrandLockup } from "./brand";
 import { cn } from "@/lib/utils";
 
@@ -46,13 +45,6 @@ export function SiteHeader({
                 label={ar.nav.myReports}
                 icon={<UserIcon className="size-5" />}
               />
-              {isStaff(user) && (
-                <HeaderLink
-                  href="/admin"
-                  label={ar.nav.admin}
-                  icon={<Shield className="size-5" />}
-                />
-              )}
             </>
           ) : (
             <Link
