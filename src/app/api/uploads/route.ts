@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { mediaUrl, newStorageKey, storage } from "@/lib/providers/storage";
 import { PENDING_REPORT_ID } from "@/lib/services/reports";
+import { couldBeAnImage } from "@/lib/uploads";
 import { ar } from "@/i18n/ar";
 
 /**
@@ -24,7 +25,6 @@ import { ar } from "@/i18n/ar";
 
 const MAX_DIMENSION = 1600;
 const THUMB_DIMENSION = 400;
-const ACCEPTED_INPUT = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 
 export async function POST(request: Request) {
   const user = await getCurrentUser();
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
   if (file.size > env.uploadMaxBytes) {
     return NextResponse.json({ error: ar.errors.uploadTooLarge }, { status: 413 });
   }
-  if (file.type && !ACCEPTED_INPUT.has(file.type)) {
+  if (!couldBeAnImage(file.type)) {
     return NextResponse.json({ error: ar.errors.uploadBadType }, { status: 415 });
   }
 
@@ -91,7 +91,11 @@ export async function POST(request: Request) {
     const resized = await sharp(full).metadata();
     width = resized.width ?? metadata.width;
     height = resized.height ?? metadata.height;
-  } catch {
+  } catch (error) {
+    // Worth a line: a format the deployed sharp cannot decode (HEIC on a build
+    // without libheif, say) looks identical to a corrupt file from here, and
+    // only the log can tell the two apart.
+    console.error("[LAGAITHA] could not decode an uploaded image:", error);
     return NextResponse.json({ error: ar.errors.imageBroken }, { status: 422 });
   }
 
@@ -104,8 +108,15 @@ export async function POST(request: Request) {
       store.put(fullKey, full, "image/webp"),
       store.put(thumbKey, thumb, "image/webp"),
     ]);
-  } catch {
-    return NextResponse.json({ error: ar.errors.uploadFailed }, { status: 500 });
+  } catch (error) {
+    // The image was fine; the place to put it was not. `storage()` throws with
+    // the actual fix in the message — STORAGE_DRIVER=local on a read-only host,
+    // a missing BLOB_READ_WRITE_TOKEN — and swallowing it turned a five-minute
+    // configuration error into an unexplained failure for every member trying
+    // to publish. Log the cause for whoever runs the site, and tell the person
+    // the truth: it is not their photo, and they can publish without one.
+    console.error("[LAGAITHA] image upload failed at the storage layer:", error);
+    return NextResponse.json({ error: ar.errors.uploadStorage }, { status: 503 });
   }
 
   // Parked against a sentinel until the report is created and adopts it.

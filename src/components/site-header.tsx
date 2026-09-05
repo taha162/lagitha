@@ -40,9 +40,12 @@ export function SiteHeader({
                 icon={<Bell className="size-5" />}
                 count={unreadNotifications}
               />
+              {/* The person icon goes to the person, not to their reports:
+                  it is where someone looks for their own account. Their
+                  reports have their own place in the bottom bar. */}
               <HeaderLink
-                href="/me/reports"
-                label={ar.nav.myReports}
+                href="/me/account"
+                label={ar.account.profileTitle}
                 icon={<UserIcon className="size-5" />}
               />
             </>

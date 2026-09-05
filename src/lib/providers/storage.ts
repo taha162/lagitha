@@ -91,6 +91,14 @@ export function storage(): Promise<StorageProvider> {
     return new LocalStorageProvider(env.storageLocalDir);
   })();
 
+  // A rejected promise left in the cache would be re-thrown for the life of
+  // the process: one bad startup and this instance can never upload again,
+  // even once the cause has passed. Forget the failure and let the next
+  // caller try afresh.
+  cached.catch(() => {
+    cached = undefined;
+  });
+
   return cached;
 }
 

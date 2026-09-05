@@ -357,3 +357,84 @@
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
+
+/* ---------------------------------------------------------------------------
+   The operations console on a phone.
+
+   The console is desktop-first — a moderator works through queues, and a wide
+   table is the right shape for that. But the person who owns a deployment may
+   only ever have a phone, and on a 390px screen a ten-column table pushes the
+   row's action buttons roughly six hundred pixels past the edge, inside a
+   horizontal scroller with nothing to suggest it exists. The actions were not
+   broken; they were out of reach, which amounts to the same thing.
+
+   So below `lg` the same markup is re-laid as one card per row: the heading
+   row is dropped, each cell becomes a labelled line (the label comes from the
+   `data-label` DataTable copies off the column heading), and the actions cell
+   — the one with no heading — spans the full width at the bottom of the card
+   where a thumb can reach it.
+--------------------------------------------------------------------------- */
+@media (width < 64rem) {
+  .lg-data-table,
+  .lg-data-table tbody,
+  .lg-data-table tr,
+  .lg-data-table td {
+    display: block;
+  }
+
+  /* The column names move onto the cells themselves. */
+  .lg-data-table thead {
+    display: none;
+  }
+
+  .lg-data-table tr {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.25rem;
+    margin: 0.75rem 0.75rem 0;
+    background: var(--color-surface);
+  }
+
+  .lg-data-table tr:last-child {
+    margin-bottom: 0.75rem;
+  }
+
+  /* Each row already draws its own border as a card; the table's row divider
+     would sit on top of it as a second line. */
+  .lg-data-table tbody > tr + tr {
+    border-top-width: 1px;
+  }
+
+  .lg-data-table td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    /* A long title or a masked address must wrap rather than widen the card. */
+    max-width: none;
+    white-space: normal;
+    padding-block: 0.25rem;
+  }
+
+  .lg-data-table td::before {
+    content: attr(data-label);
+    flex: none;
+    color: var(--color-muted);
+    font-size: var(--text-fine);
+    line-height: 1.5;
+  }
+
+  /* The actions cell carries no column name, so it gets the full width. */
+  .lg-data-table td:not([data-label]) {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    padding-top: 0.5rem;
+    margin-top: 0.25rem;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .lg-data-table td:not([data-label]) > * {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+}
